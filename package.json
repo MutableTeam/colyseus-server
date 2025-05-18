@@ -9,18 +9,18 @@
     "serve": "node lib/index.js"
   },
   "dependencies": {
-    "colyseus": "latest",
     "@colyseus/monitor": "latest",
     "@colyseus/schema": "latest",
-    "express": "latest",
-    "cors": "latest"
+    "colyseus": "latest",
+    "cors": "latest",
+    "express": "latest"
   },
   "devDependencies": {
-    "@colyseus/cloud": "latest",
-    "@types/express": "latest",
+    "@colyseus/cloud": "^1.0.12",
     "@types/cors": "latest",
-    "typescript": "latest",
+    "@types/express": "latest",
     "ts-node": "latest",
-    "ts-node-dev": "latest"
+    "ts-node-dev": "latest",
+    "typescript": "latest"
   }
 }

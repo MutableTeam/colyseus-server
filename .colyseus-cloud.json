@@ -1,4 +1,8 @@
 {
   "packageManager": "npm",
-  "installCommand": "npm install --legacy-peer-deps"
+  "installCommand": "npm install --legacy-peer-deps",
+  "production": {
+    "applicationId": "976-mutablepvp",
+    "token": "NjgyOTBjMTY0ODZjNDVNenpXWTRCakJCelg0R1dNM280Rk5XTUdJczFQZFhp"
+  }
 }
