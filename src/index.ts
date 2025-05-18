@@ -49,5 +49,5 @@ server.listen(port, () => {
   console.log(`🚀 Game server started on port ${port}`)
 })
 
-// Export for Vercel serverless functions
-export default app
+// Export for Colyseus Cloud
+export default gameServer
