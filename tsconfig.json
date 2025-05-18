@@ -12,6 +12,5 @@
     "noImplicitAny": false
   },
   "include": ["src/**/*"],
-  "include": ["src", "colyseus.config.ts"],
   "exclude": ["node_modules"]
 }
