@@ -10,7 +10,6 @@ import cors from "cors";
 import { createServer } from "http";
 import { Server } from "colyseus";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { LocalPresence } from "@colyseus/presence";
 
 const port = Number(process.env.PORT || 2567);
 
@@ -34,14 +33,13 @@ export default function() {
   
   const server = createServer(app);
   
-  // Create Colyseus server with local presence
+  // Create Colyseus server
   const gameServer = new Server({
     transport: new WebSocketTransport({
       server,
       pingInterval: 5000,
       pingMaxRetries: 3,
-    }),
-    presence: new LocalPresence()
+    })
   });
   
   // Register your room handlers
