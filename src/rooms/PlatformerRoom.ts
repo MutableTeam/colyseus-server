@@ -1,4 +1,4 @@
-import { Room, type Client } from "colyseus"
+import { Room, Client } from "@colyseus/core"
 import { PlatformerState } from "../schemas/PlatformerState"
 import { PlatformerPlayer } from "../schemas/PlatformerPlayer"
 import { Platform } from "../schemas/Platform"

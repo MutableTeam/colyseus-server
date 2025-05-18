@@ -1,4 +1,4 @@
-import { Room, type Client } from "colyseus"
+import { Room, Client } from "@colyseus/core"
 import { BattleState } from "../schemas/BattleState"
 import { Player } from "../schemas/Player"
 import { Projectile } from "../schemas/Projectile"

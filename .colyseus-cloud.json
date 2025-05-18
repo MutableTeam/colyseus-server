@@ -1,6 +1,8 @@
 {
   "packageManager": "npm",
   "installCommand": "npm install --legacy-peer-deps",
+  "buildCommand": "tsc --skipLibCheck",
+  "typescriptVersion": "4.9.5",
   "production": {
     "applicationId": "976-mutablepvp",
     "token": "NjgyOTBjMTY0ODZjNDVNenpXWTRCakJCelg0R1dNM280Rk5XTUdJczFQZFhp"

@@ -1,4 +1,4 @@
-import type { Room } from "colyseus"
+import { Room } from "@colyseus/core"
 import type { Player } from "../schemas/Player"
 
 export class AbilityManager {

@@ -1,4 +1,4 @@
-import { Room, type Client } from "colyseus"
+import { Room, Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
 
 export class LobbyRoom extends Room<LobbyState> {
