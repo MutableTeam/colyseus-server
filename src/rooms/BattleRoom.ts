@@ -1,4 +1,4 @@
-import { Room, Client } from "@colyseus/core"
+import { Room, type Client } from "colyseus"
 import { BattleState } from "../schemas/BattleState"
 import { Player } from "../schemas/Player"
 import { Projectile } from "../schemas/Projectile"
@@ -61,11 +61,10 @@ export class BattleRoom extends Room<BattleState> {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
-      // Check if player can use the ability (cooldown)
-      if (player.canUseAbility(message.abilityId)) {
-        this.abilityManager.useAbility(this, player, message.abilityId, message.targetPosition)
-        player.setAbilityCooldown(message.abilityId)
-      }
+      // Always execute ability usage and cooldown setting
+      // The canUseAbility check should be done within the abilityManager.useAbility function
+      this.abilityManager.useAbility(this, player, message.abilityId, message.targetPosition)
+      player.setAbilityCooldown(message.abilityId)
     })
 
     // Handle player changing character

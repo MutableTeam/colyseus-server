@@ -1,6 +1,6 @@
-import { Server } from "@colyseus/core";
-import { WebSocketTransport } from "@colyseus/ws-transport";
+import config from "@colyseus/tools";
 import { monitor } from "@colyseus/monitor";
+import { playground } from "@colyseus/playground";
 import cors from "cors";
 import express from "express";
 
@@ -10,37 +10,22 @@ import { BattleRoom } from "./rooms/BattleRoom";
 import { RaceRoom } from "./rooms/RaceRoom";
 import { PlatformerRoom } from "./rooms/PlatformerRoom";
 
-// Define your app configuration
-const config = {
-  // Transport configuration
-  transport: new WebSocketTransport({
-    pingInterval: 5000,
-    pingMaxRetries: 3,
-  }),
-
-  // Port to listen on
-  port: Number(process.env.PORT || 2567),
-
-  // When using @colyseus/tools, we need to define the server creation function
-  initializeGameServer: (app) => {
-    // Create the Colyseus server
-    const server = new Server({
-      transport: new WebSocketTransport({
-        pingInterval: 5000,
-        pingMaxRetries: 3,
-      }),
-    });
-
-    // Register your room handlers
-    server.define("lobby", LobbyRoom);
-    server.define("battle", BattleRoom);
-    server.define("race", RaceRoom);
-    server.define("platformer", PlatformerRoom);
-
-    return server;
+export default config({
+  id: "colyseus-server",
+  
+  options: {
+    // Port to listen on
+    port: Number(process.env.PORT || 2567),
   },
 
-  // Optional express configuration
+  initializeGameServer: (gameServer) => {
+    // Register your room handlers
+    gameServer.define("lobby", LobbyRoom);
+    gameServer.define("battle", BattleRoom);
+    gameServer.define("race", RaceRoom);
+    gameServer.define("platformer", PlatformerRoom);
+  },
+
   initializeExpress: (app) => {
     app.use(cors());
     app.use(express.json());
@@ -52,7 +37,10 @@ const config = {
 
     // Add Colyseus Monitor
     app.use("/colyseus", monitor());
+    
+    // Add Colyseus Playground (optional, for development)
+    if (process.env.NODE_ENV !== "production") {
+      app.use("/playground", playground);
+    }
   }
-};
-
-export default config;
+});

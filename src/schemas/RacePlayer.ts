@@ -26,7 +26,7 @@ export class RacePlayer extends Schema {
   @type("number") finishTime = 0
   @type("number") finishPosition = 0
 
-  @type(["number"]) checkpoints = new Array<number>()
+  @type(["number"]) checkpoints = []
 
   canUseBoost(): boolean {
     return !this.boostActive && this.boostCooldown <= 0
