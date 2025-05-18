@@ -9,11 +9,11 @@
     "serve": "node lib/index.js"
   },
   "dependencies": {
-    "@colyseus/core": "^0.14.36",
+    "@colyseus/core": "^0.14.24",
     "@colyseus/monitor": "^0.14.22",
     "@colyseus/schema": "^1.0.45",
-    "@colyseus/ws-transport": "^0.14.25",
-    "colyseus": "^0.14.36",
+    "@colyseus/ws-transport": "^0.14.21",
+    "colyseus": "^0.14.24",
     "cors": "^2.8.5",
     "express": "^4.18.2"
   },
