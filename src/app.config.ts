@@ -1,4 +1,4 @@
-import { defineConfig } from "@colyseus/tools";
+import config from "@colyseus/tools";
 import { monitor } from "@colyseus/monitor";
 import { playground } from "@colyseus/playground";
 import { LobbyRoom } from "./rooms/LobbyRoom";
@@ -6,7 +6,7 @@ import { BattleRoom } from "./rooms/BattleRoom";
 import { RaceRoom } from "./rooms/RaceRoom";
 import { PlatformerRoom } from "./rooms/PlatformerRoom";
 
-export default defineConfig({
+export default config({
   server: {
     // Transport options
     transport: {
