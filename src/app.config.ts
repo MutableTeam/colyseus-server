@@ -1,8 +1,6 @@
 import config from "@colyseus/tools";
 import { monitor } from "@colyseus/monitor";
 import { playground } from "@colyseus/playground";
-import cors from "cors";
-import express from "express";
 
 // Import game rooms
 import { LobbyRoom } from "./rooms/LobbyRoom";
@@ -13,11 +11,9 @@ import { PlatformerRoom } from "./rooms/PlatformerRoom";
 export default config({
   id: "colyseus-server",
   
-  options: {
-    // Port to listen on
-    port: Number(process.env.PORT || 2567),
-  },
-
+  // In v0.16, port is a top-level property, not inside options
+  port: Number(process.env.PORT || 2567),
+  
   initializeGameServer: (gameServer) => {
     // Register your room handlers
     gameServer.define("lobby", LobbyRoom);
@@ -27,9 +23,6 @@ export default config({
   },
 
   initializeExpress: (app) => {
-    app.use(cors());
-    app.use(express.json());
-    
     // Add health check endpoint
     app.get("/health", (req, res) => {
       res.json({ status: "ok", uptime: process.uptime() });

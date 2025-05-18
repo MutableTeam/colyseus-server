@@ -42,25 +42,28 @@ export class LobbyState extends Schema {
   }
 
   removePlayerFromGame(gameId: string, playerId: string) {
-    const game = this.availableGames.get(gameId)
-    if (game && game.playerIds.has(playerId)) {
-      game.playerIds.delete(playerId)
-      game.currentPlayers--
+  const game = this.availableGames.get(gameId)
+  if (game && game.playerIds.has(playerId)) {
+    game.playerIds.delete(playerId)
+    game.currentPlayers--
 
-      // If game is empty, remove it
-      if (game.currentPlayers === 0) {
-        this.availableGames.delete(gameId)
-      }
-      // If creator left, assign a new creator
-      else if (playerId === game.creatorId) {
-        const newCreatorId = Array.from(game.playerIds.keys())[0]
+    // If game is empty, remove it
+    if (game.currentPlayers === 0) {
+      this.availableGames.delete(gameId)
+    }
+    // If creator left, assign a new creator
+    else if (playerId === game.creatorId) {
+      // This line is causing the error - we need to ensure it's a string
+      const newCreatorId = Array.from(game.playerIds.keys())[0]
+      if (newCreatorId) {
         game.creatorId = newCreatorId
       }
-
-      return true
     }
-    return false
+
+    return true
   }
+  return false
+}
 
   removePlayerFromAllGames(playerId: string) {
     this.availableGames.forEach((game, gameId) => {
