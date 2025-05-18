@@ -1,5 +1,6 @@
 import { listen } from "@colyseus/tools";
 import { Server } from "@colyseus/core";
+import { WebSocketTransport } from "@colyseus/ws-transport";
 
 // Import game rooms
 import { LobbyRoom } from "./rooms/LobbyRoom";
@@ -11,9 +12,12 @@ import { PlatformerRoom } from "./rooms/PlatformerRoom";
 export default listen({
   // When using @colyseus/tools, we need to define the server creation function
   initializeGameServer: (app) => {
+    // Create the Colyseus server with WebSocketTransport
     const server = new Server({
-      pingInterval: 5000,
-      pingMaxRetries: 3,
+      transport: new WebSocketTransport({
+        pingInterval: 5000,
+        pingMaxRetries: 3,
+      }),
     });
 
     // Register your room handlers
