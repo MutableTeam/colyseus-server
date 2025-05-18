@@ -8,7 +8,8 @@ import { PlatformerRoom } from "./rooms/PlatformerRoom";
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
-import { Server, WebSocketTransport } from "colyseus";
+import { Server } from "colyseus";
+import { WebSocketTransport } from "@colyseus/ws-transport";
 
 const port = Number(process.env.PORT || 2567);
 
