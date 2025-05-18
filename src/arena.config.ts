@@ -6,6 +6,7 @@ import { createServer } from "http";
 import { Server } from "colyseus";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { RedisPresence } from "@colyseus/redis-presence";
+import { RedisDriver } from "@colyseus/redis-driver";
 import { LobbyRoom } from "./rooms/LobbyRoom";
 import { BattleRoom } from "./rooms/BattleRoom";
 import { RaceRoom } from "./rooms/RaceRoom";
@@ -38,7 +39,7 @@ export default function() {
   
   const server = createServer(app);
   
-  // Create Colyseus server with Redis presence
+  // Create Colyseus server with Redis components
   // Redis connection details are automatically provided by Colyseus Cloud
   const gameServer = new Server({
     transport: new WebSocketTransport({
@@ -46,7 +47,8 @@ export default function() {
       pingInterval: 5000,
       pingMaxRetries: 3,
     }),
-    presence: new RedisPresence()
+    presence: new RedisPresence(),
+    driver: new RedisDriver()
   });
   
   // Register your room handlers
