@@ -12,7 +12,7 @@
     "@colyseus/core": "^0.14.24",
     "@colyseus/monitor": "^0.14.22",
     "@colyseus/schema": "^1.0.45",
-    "@colyseus/tools": "^0.14.31",
+    "@colyseus/tools": "latest",
     "@colyseus/ws-transport": "^0.14.21",
     "colyseus": "^0.14.24",
     "cors": "^2.8.5",
