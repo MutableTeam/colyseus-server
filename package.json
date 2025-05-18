@@ -1,0 +1,26 @@
+{
+  "name": "colyseus-server",
+  "version": "1.0.0",
+  "description": "Colyseus multiplayer game server",
+  "main": "lib/index.js",
+  "scripts": {
+    "start": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "serve": "node lib/index.js"
+  },
+  "dependencies": {
+    "colyseus": "latest",
+    "@colyseus/monitor": "latest",
+    "@colyseus/schema": "latest",
+    "express": "latest",
+    "cors": "latest"
+  },
+  "devDependencies": {
+    "@colyseus/cloud": "latest",
+    "@types/express": "latest",
+    "@types/cors": "latest",
+    "typescript": "latest",
+    "ts-node": "latest",
+    "ts-node-dev": "latest"
+  }
+}
