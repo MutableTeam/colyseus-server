@@ -11,13 +11,19 @@ import { RaceRoom } from "./rooms/RaceRoom";
 import { PlatformerRoom } from "./rooms/PlatformerRoom";
 
 // Define your app configuration
-export default {
+const config = {
+  // Transport configuration
+  transport: new WebSocketTransport({
+    pingInterval: 5000,
+    pingMaxRetries: 3,
+  }),
+
   // Port to listen on
   port: Number(process.env.PORT || 2567),
 
   // When using @colyseus/tools, we need to define the server creation function
   initializeGameServer: (app) => {
-    // Create the Colyseus server with WebSocketTransport
+    // Create the Colyseus server
     const server = new Server({
       transport: new WebSocketTransport({
         pingInterval: 5000,
@@ -48,3 +54,5 @@ export default {
     app.use("/colyseus", monitor());
   }
 };
+
+export default config;
