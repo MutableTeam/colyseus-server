@@ -1,38 +1,43 @@
-Colyseus Multiplayer Game Server - Client Integration Guide
+# Colyseus Multiplayer Game Server - Client Integration Guide
+
 This comprehensive guide explains how to integrate client applications with our Colyseus multiplayer game server. It covers connection setup, room types, schema structures, and provides examples for various platforms.
 
-Table of Contents
-Installation
-JavaScript/TypeScript
-Unity
-Other Platforms
-Connection Setup
-Room Types
-Lobby Room
-Battle Room
-Race Room
-Platformer Room
-Schema Structures
-Player Schema
-Vector2D Schema
-Projectile Schema
-Other Schemas
-Manager Interactions
-Collision Manager
-Ability Manager
-Authentication
-Examples
-Web Client Example
-Unity Client Example
-Troubleshooting
-API Reference
-Installation
-JavaScript/TypeScript
+## Table of Contents
+
+- [Installation](#installation)
+  - [JavaScript/TypeScript](#javascripttypescript)
+  - [Unity](#unity)
+  - [Other Platforms](#other-platforms)
+- [Connection Setup](#connection-setup)
+- [Room Types](#room-types)
+  - [Lobby Room](#lobby-room)
+  - [Battle Room](#battle-room)
+  - [Race Room](#race-room)
+  - [Platformer Room](#platformer-room)
+- [Schema Structures](#schema-structures)
+  - [Player Schema](#player-schema)
+  - [Vector2D Schema](#vector2d-schema)
+  - [Projectile Schema](#projectile-schema)
+  - [Other Schemas](#other-schemas)
+- [Manager Interactions](#manager-interactions)
+  - [Collision Manager](#collision-manager)
+  - [Ability Manager](#ability-manager)
+- [Authentication](#authentication)
+- [Examples](#examples)
+  - [Web Client Example](#web-client-example)
+  - [Unity Client Example](#unity-client-example)
+- [Troubleshooting](#troubleshooting)
+- [API Reference](#api-reference)
+
+## Installation
+
+### JavaScript/TypeScript
+
 Install the Colyseus client library using npm:
 
+```bash
 npm install colyseus.js
-
-For browser environments, you can use the CDN:
+```
 
 ```html
 <script src="https://unpkg.com/colyseus.js@^0.14.0/dist/colyseus.js"></script>
