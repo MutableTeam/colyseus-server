@@ -2,12 +2,13 @@ import { Room, type Client } from "colyseus"
 import { RaceState } from "../schemas/RaceState"
 import { RacePlayer } from "../schemas/RacePlayer"
 import { Checkpoint } from "../schemas/Checkpoint"
+import { StateView } from "@colyseus/schema"
 
 export class RaceRoom extends Room<RaceState> {
   maxClients = 8
 
   // Initialize the room state
-  state = new RaceState();
+  state = new RaceState()
 
   // Race settings
   private trackLength = 5000 // Length of the race track
@@ -70,6 +71,10 @@ export class RaceRoom extends Room<RaceState> {
     // Set initial position at starting line
     player.position = 0
     player.lane = this.state.players.size + 1 // Assign lane based on join order
+
+    // Create a StateView for this client
+    client.view = new StateView()
+    client.view.add(player)
 
     // Add player to the game state
     this.state.players.set(client.sessionId, player)

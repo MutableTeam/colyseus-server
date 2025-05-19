@@ -1,9 +1,10 @@
-import { Room, Client } from "@colyseus/core"
+import { Room, type Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
+import { StateView } from "@colyseus/schema"
 
 export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
-  state = new LobbyState();
+  state = new LobbyState()
 
   onCreate(options: any) {
     console.log("LobbyRoom created!", options)
@@ -56,6 +57,9 @@ export class LobbyRoom extends Room<LobbyState> {
   onJoin(client: Client, options: any) {
     console.log(`Player ${client.sessionId} joined the lobby`)
     this.state.addPlayer(client.sessionId, options.username || `Player_${client.sessionId.substr(0, 6)}`)
+
+    // Create a StateView for this client
+    client.view = new StateView()
 
     // Send current state to the new player
     client.send("lobby_state", {

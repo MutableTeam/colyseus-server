@@ -4,6 +4,7 @@ import { Player } from "../schemas/Player"
 import { Projectile } from "../schemas/Projectile"
 import { AbilityManager } from "../managers/AbilityManager"
 import { CollisionManager } from "../managers/CollisionManager"
+import { StateView } from "@colyseus/schema"
 
 export class BattleRoom extends Room {
   maxClients = 8
@@ -23,7 +24,7 @@ export class BattleRoom extends Room {
     this.mapHeight = options.mapHeight || this.mapHeight
 
     // Initialize the room state
-    this.state = new BattleState(this.mapWidth, this.mapHeight);
+    this.state = new BattleState(this.mapWidth, this.mapHeight)
 
     // Initialize managers
     this.abilityManager = new AbilityManager()
@@ -61,10 +62,8 @@ export class BattleRoom extends Room {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
-      // Always execute ability usage and cooldown setting
       // The canUseAbility check should be done within the abilityManager.useAbility function
       this.abilityManager.useAbility(this, player, message.abilityId, message.targetPosition)
-      player.setAbilityCooldown(message.abilityId)
     })
 
     // Handle player changing character
@@ -109,6 +108,10 @@ export class BattleRoom extends Room {
 
     // Set abilities based on character type
     player.abilities = this.abilityManager.getAbilitiesForCharacter(player.characterType)
+
+    // Create a StateView for this client
+    client.view = new StateView()
+    client.view.add(player)
 
     // Add player to the game state
     this.state.players.set(client.sessionId, player)
