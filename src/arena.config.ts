@@ -5,7 +5,7 @@ import cors from "cors";
 import { createServer } from "http";
 import { Server } from "colyseus";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { PresenceRedis } from "@colyseus/presence-redis";
+import { RedisPresence } from "@colyseus/presence-redis"
 import { LobbyRoom } from "./rooms/LobbyRoom";
 import { BattleRoom } from "./rooms/BattleRoom";
 import { RaceRoom } from "./rooms/RaceRoom";
@@ -46,7 +46,7 @@ export default function() {
       pingInterval: 5000,
       pingMaxRetries: 3,
     }),
-    presence: new PresenceRedis(),
+    presence: new RedisPresence(),
   });
   
   // Register your room handlers
