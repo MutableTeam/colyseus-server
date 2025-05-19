@@ -4,7 +4,7 @@
   "description": "Colyseus multiplayer game server",
   "main": "lib/index.js",
   "scripts": {
-    "start": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "start": "tsx watch src/index.ts",
     "build": "tsc --skipLibCheck",
     "serve": "node lib/index.js"
   },
@@ -12,6 +12,8 @@
     "@colyseus/auth": "^0.16.0",
     "@colyseus/core": "^0.16.0",
     "@colyseus/monitor": "^0.16.0",
+    "@colyseus/playground": "^0.16.4",
+    "@colyseus/redis-driver": "^0.16.1",
     "@colyseus/redis-presence": "^0.16.0",
     "@colyseus/schema": "^3.0.0",
     "@colyseus/tools": "^0.16.8",
@@ -24,8 +26,7 @@
     "@colyseus/cloud": "^1.0.12",
     "@types/cors": "^2.8.13",
     "@types/express": "^4.17.17",
-    "ts-node": "^10.9.1",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^4.9.5"
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
   }
 }

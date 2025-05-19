@@ -6,6 +6,9 @@ import { Checkpoint } from "../schemas/Checkpoint"
 export class RaceRoom extends Room<RaceState> {
   maxClients = 8
 
+  // Initialize the room state
+  state = new RaceState();
+
   // Race settings
   private trackLength = 5000 // Length of the race track
   private numCheckpoints = 5 // Number of checkpoints
@@ -18,9 +21,6 @@ export class RaceRoom extends Room<RaceState> {
     // Set track settings from options or use defaults
     this.trackLength = options.trackLength || this.trackLength
     this.numCheckpoints = options.numCheckpoints || this.numCheckpoints
-
-    // Initialize the room state
-    this.setState(new RaceState())
 
     // Create checkpoints
     this.createCheckpoints()

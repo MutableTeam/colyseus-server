@@ -3,10 +3,10 @@ import { LobbyState } from "../schemas/LobbyState"
 
 export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
+  state = new LobbyState();
 
   onCreate(options: any) {
     console.log("LobbyRoom created!", options)
-    this.setState(new LobbyState())
 
     // Handle player joining a game
     this.onMessage("join_game", (client, message) => {

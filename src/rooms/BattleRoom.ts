@@ -5,7 +5,7 @@ import { Projectile } from "../schemas/Projectile"
 import { AbilityManager } from "../managers/AbilityManager"
 import { CollisionManager } from "../managers/CollisionManager"
 
-export class BattleRoom extends Room<BattleState> {
+export class BattleRoom extends Room {
   maxClients = 8
 
   // Game settings
@@ -23,7 +23,7 @@ export class BattleRoom extends Room<BattleState> {
     this.mapHeight = options.mapHeight || this.mapHeight
 
     // Initialize the room state
-    this.setState(new BattleState(this.mapWidth, this.mapHeight))
+    this.state = new BattleState(this.mapWidth, this.mapHeight);
 
     // Initialize managers
     this.abilityManager = new AbilityManager()
