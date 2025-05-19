@@ -46,8 +46,7 @@ export default function() {
       pingInterval: 5000,
       pingMaxRetries: 3,
     }),
-    presence: new RedisPresence(),
-    driver: new RedisDriver()
+    presence: new RedisPresence()
   });
   
   // Register your room handlers
