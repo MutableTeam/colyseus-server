@@ -1,1044 +1,1187 @@
-# Colyseus Multiplayer Game Server - Client Integration Guide
+### Colyseus Client Implementation Guide
 
-This comprehensive guide explains how to integrate client applications with our Colyseus multiplayer game server. It covers connection setup, room types, schema structures, and provides examples for various platforms.
+This README provides a comprehensive guide for implementing client-side code to interact with our Colyseus v0.16 game server.
 
 ## Table of Contents
 
-- [Installation](#installation)
-  - [JavaScript/TypeScript](#javascripttypescript)
-  - [Unity](#unity)
-  - [Other Platforms](#other-platforms)
-- [Connection Setup](#connection-setup)
-- [Room Types](#room-types)
-  - [Lobby Room](#lobby-room)
-  - [Battle Room](#battle-room)
-  - [Race Room](#race-room)
-  - [Platformer Room](#platformer-room)
-- [Schema Structures](#schema-structures)
-  - [Player Schema](#player-schema)
-  - [Vector2D Schema](#vector2d-schema)
-  - [Projectile Schema](#projectile-schema)
-  - [Other Schemas](#other-schemas)
-- [Manager Interactions](#manager-interactions)
-  - [Collision Manager](#collision-manager)
-  - [Ability Manager](#ability-manager)
-- [Authentication](#authentication)
-- [Examples](#examples)
-  - [Web Client Example](#web-client-example)
-  - [Unity Client Example](#unity-client-example)
-- [Troubleshooting](#troubleshooting)
-- [API Reference](#api-reference)
+1. [Installation](#installation)
+2. [Connecting to the Server](#connecting-to-the-server)
+3. [Room Types](#room-types)
+
+1. [Lobby Room](#lobby-room)
+2. [Battle Room](#battle-room)
+3. [Race Room](#race-room)
+4. [Platformer Room](#platformer-room)
+
+
+
+4. [Schema Synchronization](#schema-synchronization)
+5. [Handling Game Events](#handling-game-events)
+6. [Working with Abilities](#working-with-abilities)
+7. [Client-Side Prediction](#client-side-prediction)
+8. [Best Practices](#best-practices)
+9. [Troubleshooting](#troubleshooting)
+
 
 ## Installation
 
-### JavaScript/TypeScript
+First, install the Colyseus client library:
 
-Install the Colyseus client library using npm:
-
-```bash
-npm install colyseus.js
+```shellscript
+npm install colyseus.js@0.16.0
 ```
 
-```html
-<script src="https://unpkg.com/colyseus.js@^0.14.0/dist/colyseus.js"></script>
-```
-
-### Unity
-
-1. Download the latest [Colyseus Unity SDK](https://github.com/colyseus/colyseus-unity3d/releases)
-2. Import the package into your Unity project
-3. Configure the WebSocket libraries as per the Unity SDK documentation
-
-
-### Other Platforms
-
-- Defold: [colyseus-defold](https://github.com/colyseus/colyseus-defold)
-- Haxe: [colyseus-hx](https://github.com/colyseus/colyseus-hx)
-- Cocos Creator: [colyseus-cocos2d-x](https://github.com/colyseus/colyseus-cocos2d-x)
-
-
-## Connection Setup
-
-### Basic Connection
+## Connecting to the Server
 
 ```typescript
-import { Client } from "colyseus.js";
+import { Client, getStateCallbacks } from "colyseus.js";
 
-// Create a Colyseus client instance
-const client = new Client("ws://your-server-url:2567");
+// Create a client instance
+const client = new Client("ws://your-server-address:2567");
 
 // Connect to a room
 async function connectToRoom() {
   try {
+    // Join a room by name
     const room = await client.joinOrCreate("lobby", {
-      username: "Player1",
+      username: "PlayerName",
       // Additional options can be passed here
     });
     
     console.log("Connected to room:", room.id);
     
-    // Set up event listeners
-    setupRoomListeners(room);
+    // Set up state callbacks (new in v0.16)
+    const $ = getStateCallbacks(room);
     
-    return room;
+    return { room, $ };
   } catch (error) {
     console.error("Failed to join room:", error);
-  }
-}
-
-function setupRoomListeners(room) {
-  // Listen for state changes
-  room.onStateChange((state) => {
-    console.log("Room state updated:", state);
-  });
-  
-  // Listen for specific state changes
-  room.state.players.onAdd((player, sessionId) => {
-    console.log("Player added:", sessionId, player);
-  });
-  
-  room.state.players.onRemove((player, sessionId) => {
-    console.log("Player removed:", sessionId);
-  });
-  
-  // Listen for custom messages
-  room.onMessage("game_started", (message) => {
-    console.log("Game started:", message);
-  });
-  
-  // Handle disconnection
-  room.onLeave((code) => {
-    console.log("Left room:", code);
-  });
-}
-```
-
-### Reconnection
-
-```typescript
-// Store session id for reconnection
-localStorage.setItem("sessionId", room.sessionId);
-
-// Reconnect using the stored session id
-async function reconnect() {
-  try {
-    const room = await client.reconnect(
-      localStorage.getItem("roomId"),
-      localStorage.getItem("sessionId")
-    );
-    console.log("Reconnected successfully!");
-    return room;
-  } catch (error) {
-    console.error("Failed to reconnect:", error);
   }
 }
 ```
 
 ## Room Types
 
-Our server provides four different room types, each with specific functionality:
-
 ### Lobby Room
 
-The Lobby Room serves as a matchmaking hub where players can create and join games.
+The Lobby Room is used for matchmaking and creating games.
 
 ```typescript
-// Join the lobby
-const lobby = await client.joinOrCreate("lobby", { username: "Player1" });
-
-// Listen for available games
-lobby.onMessage("available_games", (games) => {
-  console.log("Available games:", games);
-});
-
-// Create a new game
-lobby.send("create_game", {
-  gameType: "battle",
-  gameName: "My Battle Room",
-  maxPlayers: 4
-});
-
-// Join an existing game
-lobby.send("join_game", {
-  gameId: "game_id_here",
-  gameType: "battle"
-});
-
-// Leave a game
-lobby.send("leave_game", {
-  gameId: "game_id_here"
-});
+async function joinLobby() {
+  const { room, $ } = await connectToRoom("lobby", { username: "Player1" });
+  
+  // Listen for available games
+  room.onMessage("lobby_state", (message) => {
+    console.log("Available games:", message.availableGames);
+    console.log("Players in lobby:", message.players);
+  });
+  
+  // Listen for new games being created
+  room.onMessage("game_created", (message) => {
+    console.log("New game created:", message);
+  });
+  
+  // Create a new game
+  function createGame(gameType, gameName, maxPlayers) {
+    room.send("create_game", { gameType, gameName, maxPlayers });
+  }
+  
+  // Join an existing game
+  function joinGame(gameId, gameType) {
+    room.send("join_game", { gameId, gameType });
+  }
+  
+  // Leave a game
+  function leaveGame(gameId) {
+    room.send("leave_game", { gameId });
+  }
+  
+  // Listen for state changes
+  $(room.state).availableGames.onAdd((game, key) => {
+    console.log("Game added:", key, game);
+    
+    // Listen for changes to this game
+    $(game).listen("currentPlayers", (value) => {
+      console.log(`Game ${key} now has ${value} players`);
+    });
+  });
+  
+  $(room.state).availableGames.onRemove((game, key) => {
+    console.log("Game removed:", key);
+  });
+  
+  $(room.state).players.onAdd((player, sessionId) => {
+    console.log("Player joined lobby:", sessionId, player.name);
+  });
+  
+  $(room.state).players.onRemove((player, sessionId) => {
+    console.log("Player left lobby:", sessionId);
+  });
+  
+  return { room, $, createGame, joinGame, leaveGame };
+}
 ```
 
 ### Battle Room
 
-The Battle Room is an arena where players can fight against each other using different characters with unique abilities and projectiles.
+The Battle Room is for real-time combat gameplay.
 
 ```typescript
-// Join a battle room
-const battleRoom = await client.joinOrCreate("battle", {
-  username: "Player1",
-  characterType: "warrior"
-});
-
-// Set up battle room listeners
-battleRoom.onStateChange((state) => {
-  // Update game state (players, projectiles, etc.)
-});
-
-// Player movement
-battleRoom.send("move", {
-  x: 1, // -1 for left, 1 for right, 0 for no horizontal movement
-  y: 0, // -1 for up, 1 for down, 0 for no vertical movement
-  speed: 200
-});
-
-// Player shooting
-battleRoom.send("shoot", {
-  angle: Math.PI / 4, // Angle in radians
-  type: "fireball" // Projectile type
-});
-
-// Using abilities
-battleRoom.send("use_ability", {
-  abilityId: "shockwave",
-  targetPosition: { x: 500, y: 300 }
-});
-
-// Change character
-battleRoom.send("change_character", {
-  characterType: "mage"
-});
-
-// Ready up
-battleRoom.send("ready", {
-  ready: true
-});
-
-// Listen for game events
-battleRoom.onMessage("player_joined", (data) => {
-  console.log("Player joined:", data);
-});
-
-battleRoom.onMessage("player_left", (data) => {
-  console.log("Player left:", data);
-});
-
-battleRoom.onMessage("game_started", (data) => {
-  console.log("Game started:", data);
-});
-
-battleRoom.onMessage("player_died", (data) => {
-  console.log("Player died:", data);
-});
-
-battleRoom.onMessage("game_ended", (data) => {
-  console.log("Game ended:", data);
-});
+async function joinBattleRoom(options = {}) {
+  const { room, $ } = await connectToRoom("battle", {
+    username: "Warrior1",
+    characterType: "warrior", // warrior, mage, archer, rogue, healer
+    ...options
+  });
+  
+  // Listen for game state changes
+  room.onMessage("game_started", (message) => {
+    console.log("Battle started!", message);
+  });
+  
+  room.onMessage("game_ended", (message) => {
+    console.log("Battle ended!", message);
+    console.log("Winner:", message.winnerId);
+    console.log("Player stats:", message.playerStats);
+  });
+  
+  room.onMessage("player_joined", (message) => {
+    console.log("Player joined:", message);
+  });
+  
+  room.onMessage("player_left", (message) => {
+    console.log("Player left:", message.id);
+  });
+  
+  room.onMessage("player_died", (message) => {
+    console.log("Player died:", message.playerId, "killed by:", message.killerId);
+  });
+  
+  room.onMessage("ability_used", (message) => {
+    console.log("Ability used:", message);
+  });
+  
+  room.onMessage("character_changed", (message) => {
+    console.log("Character changed:", message);
+  });
+  
+  // Player actions
+  function move(x, y, speed) {
+    room.send("move", { x, y, speed });
+  }
+  
+  function shoot(angle, type = "default") {
+    room.send("shoot", { angle, type });
+  }
+  
+  function useAbility(abilityId, targetPosition = null) {
+    room.send("use_ability", { abilityId, targetPosition });
+  }
+  
+  function changeCharacter(characterType) {
+    room.send("change_character", { characterType });
+  }
+  
+  function setReady(ready = true) {
+    room.send("ready", { ready });
+  }
+  
+  // State synchronization
+  $(room.state).players.onAdd((player, sessionId) => {
+    console.log("Player added to state:", sessionId);
+    
+    // Track player position changes
+    $(player).position.listen("x", (value, previousValue) => {
+      console.log(`Player ${sessionId} moved X: ${previousValue} -> ${value}`);
+    });
+    
+    $(player).position.listen("y", (value, previousValue) => {
+      console.log(`Player ${sessionId} moved Y: ${previousValue} -> ${value}`);
+    });
+    
+    // Track player health
+    $(player).listen("health", (value, previousValue) => {
+      console.log(`Player ${sessionId} health: ${previousValue} -> ${value}`);
+    });
+  });
+  
+  $(room.state).players.onRemove((player, sessionId) => {
+    console.log("Player removed from state:", sessionId);
+  });
+  
+  $(room.state).projectiles.onAdd((projectile, key) => {
+    console.log("Projectile added:", key);
+  });
+  
+  $(room.state).projectiles.onRemove((projectile, key) => {
+    console.log("Projectile removed:", key);
+  });
+  
+  // Listen for game state changes
+  $(room.state).listen("gameStarted", (value) => {
+    if (value) console.log("Game has started!");
+  });
+  
+  $(room.state).listen("gameEnded", (value) => {
+    if (value) console.log("Game has ended!");
+  });
+  
+  return { room, $, move, shoot, useAbility, changeCharacter, setReady };
+}
 ```
 
 ### Race Room
 
-The Race Room is for racing games where players compete to reach the finish line first.
+The Race Room is for racing gameplay.
 
 ```typescript
-// Join a race room
-const raceRoom = await client.joinOrCreate("race", {
-  username: "Player1",
-  vehicleType: "sports"
-});
-
-// Set up race room listeners
-raceRoom.onStateChange((state) => {
-  // Update race state (player positions, checkpoints, etc.)
-});
-
-// Player movement
-raceRoom.send("move", {
-  acceleration: 1, // -1 to 1 (brake to full acceleration)
-  steering: -0.5 // -1 to 1 (left to right)
-});
-
-// Use boost
-raceRoom.send("use_boost");
-
-// Ready up
-raceRoom.send("ready", {
-  ready: true
-});
-
-// Listen for race events
-raceRoom.onMessage("countdown_started", (data) => {
-  console.log("Countdown started:", data);
-});
-
-raceRoom.onMessage("race_started", (data) => {
-  console.log("Race started:", data);
-});
-
-raceRoom.onMessage("checkpoint_reached", (data) => {
-  console.log("Checkpoint reached:", data);
-});
-
-raceRoom.onMessage("player_finished", (data) => {
-  console.log("Player finished:", data);
-});
-
-raceRoom.onMessage("race_ended", (data) => {
-  console.log("Race ended:", data);
-});
+async function joinRaceRoom(options = {}) {
+  const { room, $ } = await connectToRoom("race", {
+    username: "Racer1",
+    vehicleType: "default",
+    ...options
+  });
+  
+  // Listen for race events
+  room.onMessage("countdown_started", (message) => {
+    console.log("Race countdown started:", message.countdownTime);
+  });
+  
+  room.onMessage("race_started", (message) => {
+    console.log("Race started at:", message.startTime);
+  });
+  
+  room.onMessage("race_ended", (message) => {
+    console.log("Race ended:", message);
+    console.log("Results:", message.playerResults);
+  });
+  
+  room.onMessage("player_joined", (message) => {
+    console.log("Player joined race:", message);
+  });
+  
+  room.onMessage("player_left", (message) => {
+    console.log("Player left race:", message.id);
+  });
+  
+  room.onMessage("player_finished", (message) => {
+    console.log("Player finished race:", message);
+  });
+  
+  room.onMessage("checkpoint_reached", (message) => {
+    console.log("Checkpoint reached:", message);
+  });
+  
+  // Player actions
+  function move(acceleration, steering) {
+    room.send("move", { acceleration, steering });
+  }
+  
+  function useBoost() {
+    room.send("use_boost");
+  }
+  
+  function setReady(ready = true) {
+    room.send("ready", { ready });
+  }
+  
+  // State synchronization
+  $(room.state).players.onAdd((player, sessionId) => {
+    console.log("Player added to race:", sessionId);
+    
+    // Track player position changes
+    $(player).listen("position", (value, previousValue) => {
+      console.log(`Player ${sessionId} position: ${previousValue} -> ${value}`);
+    });
+    
+    // Track player speed
+    $(player).listen("speed", (value, previousValue) => {
+      console.log(`Player ${sessionId} speed: ${previousValue} -> ${value}`);
+    });
+    
+    // Track boost status
+    $(player).listen("boostActive", (value) => {
+      console.log(`Player ${sessionId} boost active: ${value}`);
+    });
+    
+    // Track checkpoints
+    $(player).checkpoints.onAdd((checkpointId) => {
+      console.log(`Player ${sessionId} reached checkpoint: ${checkpointId}`);
+    });
+  });
+  
+  $(room.state).players.onRemove((player, sessionId) => {
+    console.log("Player removed from race:", sessionId);
+  });
+  
+  // Listen for race state changes
+  $(room.state).listen("countdownActive", (value) => {
+    console.log("Countdown active:", value);
+  });
+  
+  $(room.state).listen("countdownTime", (value) => {
+    console.log("Countdown time:", value);
+  });
+  
+  $(room.state).listen("raceStarted", (value) => {
+    if (value) console.log("Race has started!");
+  });
+  
+  $(room.state).listen("raceEnded", (value) => {
+    if (value) console.log("Race has ended!");
+  });
+  
+  $(room.state).listen("raceTime", (value) => {
+    // Update race timer display
+  });
+  
+  return { room, $, move, useBoost, setReady };
+}
 ```
 
 ### Platformer Room
 
-The Platformer Room is for cooperative or competitive platformer games with collectibles, enemies, and character abilities.
+The Platformer Room is for 2D platformer gameplay.
 
 ```typescript
-// Join a platformer room
-const platformerRoom = await client.joinOrCreate("platformer", {
-  username: "Player1",
-  characterType: "knight"
-});
-
-// Set up platformer room listeners
-platformerRoom.onStateChange((state) => {
-  // Update game state (players, platforms, collectibles, enemies, etc.)
-});
-
-// Player movement
-platformerRoom.send("move", {
-  direction: 1 // -1 for left, 0 for none, 1 for right
-});
-
-// Player jumping
-platformerRoom.send("jump");
-
-// Player attacking
-platformerRoom.send("attack");
-
-// Using abilities
-platformerRoom.send("use_ability", {
-  targetPosition: { x: 500, y: 300 }
-});
-
-// Ready up
-platformerRoom.send("ready", {
-  ready: true
-});
-
-// Listen for platformer events
-platformerRoom.onMessage("level_data", (data) => {
-  console.log("Level data received:", data);
-});
-
-platformerRoom.onMessage("game_started", (data) => {
-  console.log("Game started:", data);
-});
-
-platformerRoom.onMessage("collectible_collected", (data) => {
-  console.log("Collectible collected:", data);
-});
-
-platformerRoom.onMessage("enemy_defeated", (data) => {
-  console.log("Enemy defeated:", data);
-});
-
-platformerRoom.onMessage("player_died", (data) => {
-  console.log("Player died:", data);
-});
-
-platformerRoom.onMessage("player_respawned", (data) => {
-  console.log("Player respawned:", data);
-});
-
-platformerRoom.onMessage("game_ended", (data) => {
-  console.log("Game ended:", data);
-});
-```
-
-## Schema Structures
-
-Our server uses Colyseus Schema to synchronize state between server and clients. Here are the key schema structures:
-
-### Player Schema
-
-```typescript
-// Client-side schema definition
-import { Schema, type } from "@colyseus/schema";
-
-class Vector2D extends Schema {
-  @type("number") x = 0;
-  @type("number") y = 0;
-}
-
-class Player extends Schema {
-  @type("string") id: string;
-  @type("string") name: string;
-  @type("string") characterType = "default";
-
-  @type(Vector2D) position = new Vector2D();
-  @type(Vector2D) moveDirection = new Vector2D();
-  @type("number") speed = 200;
-
-  @type("number") health = 100;
-  @type("number") maxHealth = 100;
-  @type("number") kills = 0;
-
-  @type("boolean") ready = false;
-
-  @type("number") lastShotTime = 0;
-  @type(["string"]) abilities = [];
-}
-```
-
-### Vector2D Schema
-
-```typescript
-class Vector2D extends Schema {
-  @type("number") x = 0;
-  @type("number") y = 0;
-}
-```
-
-### Projectile Schema
-
-```typescript
-class Projectile extends Schema {
-  @type("string") id: string;
-  @type("string") ownerId: string;
-  @type("string") type = "default";
-
-  @type(Vector2D) position = new Vector2D();
-  @type(Vector2D) velocity = new Vector2D();
-
-  @type("number") damage = 10;
-  @type("number") radius = 5;
-  @type("number") lifetime = 2; // seconds
-}
-```
-
-### Other Schemas
-
-For complete schema definitions, refer to the following files in the server repository:
-
-- `src/schemas/BattleState.ts`
-- `src/schemas/RaceState.ts`
-- `src/schemas/PlatformerState.ts`
-- `src/schemas/LobbyState.ts`
-- `src/schemas/RacePlayer.ts`
-- `src/schemas/PlatformerPlayer.ts`
-- `src/schemas/Checkpoint.ts`
-- `src/schemas/Platform.ts`
-- `src/schemas/Collectible.ts`
-- `src/schemas/Enemy.ts`
-
-
-## Manager Interactions
-
-The server uses several manager classes to handle game logic. Here's how clients interact with them:
-
-### Collision Manager
-
-The Collision Manager handles collision detection between game objects. Clients don't interact with it directly, but they receive the results of collision detection through state updates and messages.
-
-### Ability Manager
-
-The Ability Manager handles character abilities. Clients trigger abilities by sending messages to the server:
-
-```typescript
-// Using an ability
-room.send("use_ability", {
-  abilityId: "fireball",
-  targetPosition: { x: 500, y: 300 }
-});
-
-// Listen for ability effects
-room.onMessage("ability_used", (data) => {
-  console.log("Ability used:", data);
-  // data contains: playerId, abilityId, targetPosition, etc.
+async function joinPlatformerRoom(options = {}) {
+  const { room, $ } = await connectToRoom("platformer", {
+    username: "Jumper1",
+    characterType: "knight", // knight, mage, rogue
+    ...options
+  });
   
-  // Handle visual effects based on ability type
-  switch(data.abilityId) {
-    case "fireball":
-      createFireballEffect(data.targetPosition);
-      break;
-    case "teleport":
-      createTeleportEffect(data.playerId, data.targetPosition);
-      break;
-    // Handle other abilities
+  // Listen for level data
+  room.onMessage("level_data", (message) => {
+    console.log("Level data received:", message);
+    // Initialize level with platforms, collectibles, and enemies
+  });
+  
+  // Listen for game events
+  room.onMessage("game_started", (message) => {
+    console.log("Platformer game started:", message);
+  });
+  
+  room.onMessage("game_ended", (message) => {
+    console.log("Platformer game ended:", message);
+    console.log("Player results:", message.playerResults);
+  });
+  
+  room.onMessage("player_joined", (message) => {
+    console.log("Player joined platformer:", message);
+  });
+  
+  room.onMessage("player_left", (message) => {
+    console.log("Player left platformer:", message.id);
+  });
+  
+  room.onMessage("player_attack", (message) => {
+    console.log("Player attacked:", message);
+  });
+  
+  room.onMessage("player_damaged", (message) => {
+    console.log("Player damaged:", message);
+  });
+  
+  room.onMessage("player_died", (message) => {
+    console.log("Player died:", message);
+  });
+  
+  room.onMessage("player_respawned", (message) => {
+    console.log("Player respawned:", message);
+  });
+  
+  room.onMessage("collectible_collected", (message) => {
+    console.log("Collectible collected:", message);
+  });
+  
+  room.onMessage("enemy_damaged", (message) => {
+    console.log("Enemy damaged:", message);
+  });
+  
+  room.onMessage("enemy_defeated", (message) => {
+    console.log("Enemy defeated:", message);
+  });
+  
+  room.onMessage("ability_used", (message) => {
+    console.log("Ability used:", message);
+  });
+  
+  // Player actions
+  function move(direction) {
+    room.send("move", { direction }); // -1 (left), 0 (none), 1 (right)
   }
-});
+  
+  function jump() {
+    room.send("jump");
+  }
+  
+  function attack() {
+    room.send("attack");
+  }
+  
+  function useAbility(targetPosition = null) {
+    room.send("use_ability", { targetPosition });
+  }
+  
+  function setReady(ready = true) {
+    room.send("ready", { ready });
+  }
+  
+  // State synchronization
+  $(room.state).players.onAdd((player, sessionId) => {
+    console.log("Player added to platformer:", sessionId);
+    
+    // Track player position changes
+    $(player).position.listen("x", (value, previousValue) => {
+      console.log(`Player ${sessionId} moved X: ${previousValue} -> ${value}`);
+    });
+    
+    $(player).position.listen("y", (value, previousValue) => {
+      console.log(`Player ${sessionId} moved Y: ${previousValue} -> ${value}`);
+    });
+    
+    // Track player velocity
+    $(player).velocity.listen("x", (value) => {
+      // Update player horizontal movement animation
+    });
+    
+    $(player).velocity.listen("y", (value) => {
+      // Update player vertical movement animation
+    });
+    
+    // Track player state
+    $(player).listen("health", (value) => {
+      console.log(`Player ${sessionId} health: ${value}`);
+    });
+    
+    $(player).listen("score", (value) => {
+      console.log(`Player ${sessionId} score: ${value}`);
+    });
+    
+    $(player).listen("attacking", (value) => {
+      if (value) {
+        // Play attack animation
+      }
+    });
+    
+    $(player).listen("usingAbility", (value) => {
+      if (value) {
+        // Play ability animation
+      }
+    });
+    
+    $(player).listen("canJump", (value) => {
+      // Update jump availability UI
+    });
+  });
+  
+  $(room.state).players.onRemove((player, sessionId) => {
+    console.log("Player removed from platformer:", sessionId);
+  });
+  
+  // Track platforms, collectibles, and enemies
+  $(room.state).platforms.onAdd((platform, index) => {
+    console.log("Platform added:", platform);
+    // Create platform in game world
+  });
+  
+  $(room.state).collectibles.onAdd((collectible, index) => {
+    console.log("Collectible added:", collectible);
+    // Create collectible in game world
+  });
+  
+  $(room.state).collectibles.onRemove((collectible, index) => {
+    console.log("Collectible removed:", index);
+    // Remove collectible from game world
+  });
+  
+  $(room.state).enemies.onAdd((enemy, index) => {
+    console.log("Enemy added:", enemy);
+    // Create enemy in game world
+    
+    $(enemy).position.listen("x", (value) => {
+      // Update enemy position
+    });
+    
+    $(enemy).position.listen("y", (value) => {
+      // Update enemy position
+    });
+    
+    $(enemy).listen("health", (value) => {
+      // Update enemy health display
+    });
+    
+    $(enemy).listen("stunned", (value) => {
+      if (value) {
+        // Show stunned animation
+      }
+    });
+  });
+  
+  $(room.state).enemies.onRemove((enemy, index) => {
+    console.log("Enemy removed:", index);
+    // Remove enemy from game world
+  });
+  
+  return { room, $, move, jump, attack, useAbility, setReady };
+}
 ```
 
-## Authentication
+## Schema Synchronization
 
-Our server currently uses a simple username-based authentication. For production, you might want to implement a more secure authentication system.
+Colyseus v0.16 introduces a new way to handle schema callbacks using the `$()` proxy. Here's how to work with it:
 
 ```typescript
-// Basic authentication when joining a room
-const room = await client.joinOrCreate("lobby", {
-  username: "Player1",
-  token: "optional-auth-token"
-});
+import { getStateCallbacks } from "colyseus.js";
+
+function setupSchemaCallbacks(room) {
+  const $ = getStateCallbacks(room);
+  
+  // Listen for top-level state changes
+  $(room.state).listen("gameStarted", (value) => {
+    console.log("Game started:", value);
+  });
+  
+  // Listen for map additions
+  $(room.state).players.onAdd((player, sessionId) => {
+    console.log("Player added:", sessionId);
+    
+    // Listen for nested property changes
+    $(player).position.listen("x", (value, previousValue) => {
+      console.log(`Position X changed: ${previousValue} -> ${value}`);
+    });
+    
+    $(player).position.listen("y", (value, previousValue) => {
+      console.log(`Position Y changed: ${previousValue} -> ${value}`);
+    });
+    
+    // Listen for direct property changes
+    $(player).listen("health", (value, previousValue) => {
+      console.log(`Health changed: ${previousValue} -> ${value}`);
+    });
+  });
+  
+  // Listen for map removals
+  $(room.state).players.onRemove((player, sessionId) => {
+    console.log("Player removed:", sessionId);
+  });
+  
+  // Listen for array additions
+  $(room.state).platforms.onAdd((platform, index) => {
+    console.log("Platform added at index:", index);
+  });
+  
+  // Listen for array removals
+  $(room.state).platforms.onRemove((platform, index) => {
+    console.log("Platform removed at index:", index);
+  });
+  
+  // Listen for array changes
+  $(room.state).platforms.onChange((platform, index) => {
+    console.log("Platform changed at index:", index);
+  });
+  
+  return $;
+}
 ```
 
-## Examples
+## Handling Game Events
 
-### Web Client Example
-
-Here's a complete example of a web client connecting to our Colyseus server:
-
-```html
-&lt;!DOCTYPE html>
-<html>
-<head>
-  <title>Colyseus Game Client</title>
-  <style>
-    canvas {
-      width: 800px;
-      height: 600px;
-      border: 1px solid black;
-    }
-    #controls {
-      margin-top: 10px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Colyseus Game Client</h1>
-  <canvas id="gameCanvas" width="800" height="600"></canvas>
-  <div id="controls">
-    <button id="connectBtn">Connect to Lobby</button>
-    <button id="createGameBtn" disabled>Create Battle Game</button>
-    <button id="readyBtn" disabled>Ready</button>
-  </div>
-  <div id="gamesList"></div>
-  <div id="status"></div>
-
-  <script src="https://unpkg.com/colyseus.js@^0.14.0/dist/colyseus.js"></script>
-  <script>
-    // Game client implementation
-    const client = new Colyseus.Client('ws://your-server-url:2567');
-    let lobbyRoom = null;
-    let gameRoom = null;
-    
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    const statusDiv = document.getElementById('status');
-    const gamesListDiv = document.getElementById('gamesList');
-    
-    // UI elements
-    const connectBtn = document.getElementById('connectBtn');
-    const createGameBtn = document.getElementById('createGameBtn');
-    const readyBtn = document.getElementById('readyBtn');
-    
-    // Connect to lobby
-    connectBtn.addEventListener('click', async () => {
-      try {
-        statusDiv.innerText = "Connecting to lobby...";
-        lobbyRoom = await client.joinOrCreate("lobby", { username: "Player_" + Math.floor(Math.random() * 1000) });
-        statusDiv.innerText = "Connected to lobby!";
-        createGameBtn.disabled = false;
-        
-        // Set up lobby listeners
-        lobbyRoom.onMessage("available_games", (games) => {
-          updateGamesList(games);
-        });
-        
-        lobbyRoom.onMessage("game_created", (game) => {
-          statusDiv.innerText = `Game created: ${game.gameName} (${game.gameId})`;
-          joinGame(game.gameId, game.gameType);
-        });
-        
-        // Request available games
-        lobbyRoom.send("get_games");
-      } catch (error) {
-        statusDiv.innerText = "Error connecting to lobby: " + error.message;
-      }
-    });
-    
-    // Create a battle game
-    createGameBtn.addEventListener('click', () => {
-      if (lobbyRoom) {
-        lobbyRoom.send("create_game", {
-          gameType: "battle",
-          gameName: "Battle_" + Math.floor(Math.random() * 1000),
-          maxPlayers: 4
-        });
-      }
-    });
-    
-    // Ready up
-    readyBtn.addEventListener('click', () => {
-      if (gameRoom) {
-        gameRoom.send("ready", { ready: true });
-        readyBtn.disabled = true;
-        statusDiv.innerText = "Ready! Waiting for other players...";
-      }
-    });
-    
-    // Update games list
-    function updateGamesList(games) {
-      gamesListDiv.innerHTML = "<h3>Available Games:</h3>";
-      if (games.length === 0) {
-        gamesListDiv.innerHTML += "<p>No games available</p>";
-        return;
-      }
-      
-      const ul = document.createElement('ul');
-      games.forEach(game => {
-        const li = document.createElement('li');
-        li.innerText = `${game.gameName} (${game.gameType}) - ${game.currentPlayers}/${game.maxPlayers} players`;
-        
-        const joinBtn = document.createElement('button');
-        joinBtn.innerText = "Join";
-        joinBtn.onclick = () => joinGame(game.gameId, game.gameType);
-        li.appendChild(joinBtn);
-        
-        ul.appendChild(li);
-      });
-      gamesListDiv.appendChild(ul);
-    }
-    
-    // Join a game
-    async function joinGame(gameId, gameType) {
-      try {
-        statusDiv.innerText = `Joining ${gameType} game...`;
-        
-        // Leave lobby first
-        if (lobbyRoom) {
-          lobbyRoom.leave();
-        }
-        
-        // Join the game room
-        gameRoom = await client.joinById(gameId, {
-          username: "Player_" + Math.floor(Math.random() * 1000),
-          characterType: "warrior"
-        });
-        
-        statusDiv.innerText = `Joined ${gameType} game!`;
-        readyBtn.disabled = false;
-        
-        // Set up game room listeners
-        setupGameRoomListeners(gameRoom, gameType);
-        
-        // Start game loop
-        requestAnimationFrame(gameLoop);
-      } catch (error) {
-        statusDiv.innerText = "Error joining game: " + error.message;
-      }
-    }
-    
-    // Set up game room listeners
-    function setupGameRoomListeners(room, gameType) {
-      room.onStateChange((state) => {
-        // State updated
-      });
-      
-      room.state.players.onAdd((player, sessionId) => {
-        console.log("Player added:", sessionId, player);
-      });
-      
-      room.state.players.onRemove((player, sessionId) => {
-        console.log("Player removed:", sessionId);
-      });
-      
-      room.onMessage("game_started", (data) => {
-        statusDiv.innerText = "Game started!";
-      });
-      
-      room.onMessage("game_ended", (data) => {
-        statusDiv.innerText = `Game ended! Winner: ${data.winnerId}`;
-      });
-      
-      // Add more listeners based on game type
-      if (gameType === "battle") {
-        setupBattleRoomListeners(room);
-      } else if (gameType === "race") {
-        setupRaceRoomListeners(room);
-      } else if (gameType === "platformer") {
-        setupPlatformerRoomListeners(room);
-      }
-    }
-    
-    // Set up battle room specific listeners
-    function setupBattleRoomListeners(room) {
-      room.onMessage("player_died", (data) => {
-        console.log("Player died:", data);
-      });
-      
-      // Add keyboard controls for battle room
-      document.addEventListener('keydown', (e) => {
-        if (!room) return;
-        
-        switch(e.key) {
-          case 'ArrowLeft':
-            room.send("move", { x: -1, y: 0, speed: 200 });
-            break;
-          case 'ArrowRight':
-            room.send("move", { x: 1, y: 0, speed: 200 });
-            break;
-          case 'ArrowUp':
-            room.send("move", { x: 0, y: -1, speed: 200 });
-            break;
-          case 'ArrowDown':
-            room.send("move", { x: 0, y: 1, speed: 200 });
-            break;
-          case ' ': // Space
-            room.send("shoot", { angle: 0, type: "default" });
-            break;
-          case 'q':
-            room.send("use_ability", { abilityId: "fireball", targetPosition: { x: 500, y: 300 } });
-            break;
-        }
-      });
-      
-      document.addEventListener('keyup', (e) => {
-        if (!room) return;
-        
-        if (['ArrowLeft', 'ArrowRight'].includes(e.key)) {
-          room.send("move", { x: 0, y: 0 });
-        } else if (['ArrowUp', 'ArrowDown'].includes(e.key)) {
-          room.send("move", { x: 0, y: 0 });
-        }
-      });
-    }
-    
-    // Set up race room specific listeners
-    function setupRaceRoomListeners(room) {
-      // Similar to battle room listeners
-    }
-    
-    // Set up platformer room specific listeners
-    function setupPlatformerRoomListeners(room) {
-      // Similar to battle room listeners
-    }
-    
-    // Game loop
-    function gameLoop() {
-      // Clear canvas
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Draw game state
-      if (gameRoom && gameRoom.state) {
-        // Draw players
-        gameRoom.state.players.forEach((player, sessionId) => {
-          ctx.fillStyle = sessionId === gameRoom.sessionId ? 'blue' : 'red';
-          ctx.beginPath();
-          ctx.arc(player.position.x, player.position.y, 20, 0, Math.PI * 2);
-          ctx.fill();
-          
-          // Draw player name
-          ctx.fillStyle = 'black';
-          ctx.font = '12px Arial';
-          ctx.fillText(player.name, player.position.x - 20, player.position.y - 25);
-          
-          // Draw health bar
-          ctx.fillStyle = 'red';
-          ctx.fillRect(player.position.x - 20, player.position.y - 20, 40, 5);
-          ctx.fillStyle = 'green';
-          ctx.fillRect(player.position.x - 20, player.position.y - 20, 40 * (player.health / player.maxHealth), 5);
-        });
-        
-        // Draw projectiles if in battle room
-        if (gameRoom.state.projectiles) {
-          gameRoom.state.projectiles.forEach((projectile) => {
-            ctx.fillStyle = 'orange';
-            ctx.beginPath();
-            ctx.arc(projectile.position.x, projectile.position.y, projectile.radius, 0, Math.PI * 2);
-            ctx.fill();
-          });
-        }
-      }
-      
-      requestAnimationFrame(gameLoop);
-    }
-  </script>
-</body>
-</html>
+```typescript
+function setupGameEventHandlers(room) {
+  // Generic message handler
+  room.onMessage("*", (type, message) => {
+    console.log(`Received message of type: ${type}`, message);
+  });
+  
+  // Specific message handlers
+  room.onMessage("game_started", (message) => {
+    // Handle game start
+  });
+  
+  room.onMessage("game_ended", (message) => {
+    // Handle game end
+  });
+  
+  // Error handling
+  room.onError((code, message) => {
+    console.error(`Room error (${code}):`, message);
+  });
+  
+  // Disconnection handling
+  room.onLeave((code) => {
+    console.log(`Left room with code: ${code}`);
+  });
+}
 ```
 
-### Unity Client Example
+## Working with Abilities
 
-Here's a basic example of connecting to our Colyseus server from Unity:
+The server includes an AbilityManager that handles different character abilities. Here's how to work with it on the client side:
 
-```csharp
-using UnityEngine;
-using Colyseus;
-using System.Collections.Generic;
+```typescript
+// Character ability mappings
+const characterAbilities = {
+  warrior: ["charge", "shockwave", "berserk"],
+  mage: ["fireball", "teleport", "frostNova"],
+  archer: ["multishot", "trap", "rapidFire"],
+  rogue: ["stealth", "smokeBomb", "backstab"],
+  healer: ["heal", "shield", "revive"]
+};
 
-public class ColyseusClient : MonoBehaviour
-{
-    // Colyseus client instance
-    private ColyseusClient client;
-    private ColyseusRoom<dynamic> room;
-
-    // Server URL
-    [SerializeField] private string serverUrl = "ws://localhost:2567";
-    [SerializeField] private string roomName = "battle";
-
-    // Player prefab
-    [SerializeField] private GameObject playerPrefab;
+// Ability cooldown tracking
+class ClientAbilityManager {
+  constructor(room, $) {
+    this.room = room;
+    this.$ = $;
+    this.cooldowns = {};
+    this.abilityIcons = {}; // Map ability IDs to UI elements
+  }
+  
+  setupAbilityTracking(playerId) {
+    const player = this.room.state.players.get(playerId);
+    if (!player) return;
     
-    // Dictionary to store player game objects
-    private Dictionary<string, GameObject> players = new Dictionary<string, GameObject>();
-
-    private async void Start()
-    {
-        // Create Colyseus client
-        client = new ColyseusClient(serverUrl);
-        
-        try
-        {
-            // Join or create room
-            room = await client.JoinOrCreate<dynamic>(roomName, new Dictionary<string, object>() {
-                { "username", "UnityPlayer_" + Random.Range(0, 1000) },
-                { "characterType", "warrior" }
-            });
-            
-            Debug.Log("Connected to room: " + room.Id);
-            
-            // Set up room event handlers
-            SetupRoomHandlers();
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError("Could not connect to server: " + e.Message);
-        }
+    // Track ability cooldowns
+    $(player).abilityCooldowns.onAdd((cooldown, abilityId) => {
+      this.cooldowns[abilityId] = cooldown;
+      this.updateAbilityUI(abilityId, cooldown);
+    });
+    
+    $(player).abilityCooldowns.onChange((cooldown, abilityId) => {
+      this.cooldowns[abilityId] = cooldown;
+      this.updateAbilityUI(abilityId, cooldown);
+    });
+    
+    $(player).abilityCooldowns.onRemove((cooldown, abilityId) => {
+      delete this.cooldowns[abilityId];
+      this.updateAbilityUI(abilityId, 0);
+    });
+  }
+  
+  useAbility(abilityId, targetPosition = null) {
+    // Check local cooldown first to avoid unnecessary server requests
+    if (this.cooldowns[abilityId] > 0) {
+      console.log(`Ability ${abilityId} is on cooldown: ${this.cooldowns[abilityId]}ms remaining`);
+      return false;
     }
-
-    private void SetupRoomHandlers()
-    {
-        // Add event listeners
-        room.OnStateChange += OnStateChangeHandler;
-        room.OnMessage<object>("game_started", OnGameStarted);
-        room.OnMessage<object>("game_ended", OnGameEnded);
-        room.OnMessage<object>("player_died", OnPlayerDied);
-        
-        // Listen for player additions and removals
-        room.State.players.OnAdd += OnPlayerAdd;
-        room.State.players.OnRemove += OnPlayerRemove;
-        
-        // Listen for projectile additions and removals
-        room.State.projectiles.OnAdd += OnProjectileAdd;
-        room.State.projectiles.OnRemove += OnProjectileRemove;
+    
+    // Send ability use request to server
+    this.room.send("use_ability", { abilityId, targetPosition });
+    return true;
+  }
+  
+  updateAbilityUI(abilityId, cooldown) {
+    // Update UI to show cooldown
+    const icon = this.abilityIcons[abilityId];
+    if (icon) {
+      if (cooldown > 0) {
+        // Show cooldown overlay
+        icon.showCooldown(cooldown);
+      } else {
+        // Show ability as available
+        icon.hideCooldown();
+      }
     }
+  }
+  
+  registerAbilityIcon(abilityId, iconElement) {
+    this.abilityIcons[abilityId] = iconElement;
+  }
+}
+```
 
-    private void OnStateChangeHandler(dynamic state, bool isFirstState)
-    {
-        // Handle state changes
-        Debug.Log("State changed!");
-    }
+## Client-Side Prediction
 
-    private void OnPlayerAdd(string sessionId, dynamic player)
-    {
-        Debug.Log("Player added: " + sessionId);
-        
-        // Create player game object
-        GameObject playerGO = Instantiate(playerPrefab, new Vector3(player.position.x, 0, player.position.y), Quaternion.identity);
-        playerGO.name = "Player_" + sessionId;
-        
-        // Store reference to player game object
-        players[sessionId] = playerGO;
-        
-        // Set up player component
-        PlayerController controller = playerGO.GetComponent<PlayerController>();
-        if (controller != null)
-        {
-            controller.Initialize(player, sessionId == room.SessionId);
-        }
-    }
+For smoother gameplay, implement client-side prediction:
 
-    private void OnPlayerRemove(string sessionId, dynamic player)
-    {
-        Debug.Log("Player removed: " + sessionId);
-        
-        // Remove player game object
-        if (players.TryGetValue(sessionId, out GameObject playerGO))
-        {
-            Destroy(playerGO);
-            players.Remove(sessionId);
-        }
+```typescript
+class ClientPrediction {
+  constructor(room, $) {
+    this.room = room;
+    this.$ = $;
+    this.localPlayer = null;
+    this.serverPosition = { x: 0, y: 0 };
+    this.predictedPosition = { x: 0, y: 0 };
+    this.lastInput = { x: 0, y: 0, speed: 0 };
+    this.lastInputTime = 0;
+    this.reconciliationThreshold = 10; // pixels
+  }
+  
+  initialize(playerId) {
+    this.localPlayer = this.room.state.players.get(playerId);
+    if (!this.localPlayer) return;
+    
+    // Track server position
+    $(this.localPlayer).position.listen("x", (value) => {
+      this.serverPosition.x = value;
+      this.reconcile();
+    });
+    
+    $(this.localPlayer).position.listen("y", (value) => {
+      this.serverPosition.y = value;
+      this.reconcile();
+    });
+    
+    // Initialize predicted position
+    this.predictedPosition.x = this.localPlayer.position.x;
+    this.predictedPosition.y = this.localPlayer.position.y;
+  }
+  
+  move(x, y, speed) {
+    // Send input to server
+    this.room.send("move", { x, y, speed });
+    
+    // Store input for prediction
+    this.lastInput = { x, y, speed };
+    this.lastInputTime = Date.now();
+    
+    // Apply prediction immediately
+    this.applyPrediction();
+  }
+  
+  applyPrediction() {
+    // Simple prediction based on last input
+    const now = Date.now();
+    const dt = (now - this.lastInputTime) / 1000;
+    
+    this.predictedPosition.x += this.lastInput.x * this.lastInput.speed * dt;
+    this.predictedPosition.y += this.lastInput.y * this.lastInput.speed * dt;
+    
+    // Update last input time
+    this.lastInputTime = now;
+    
+    return this.predictedPosition;
+  }
+  
+  reconcile() {
+    // Check if server and predicted positions are too far apart
+    const dx = this.serverPosition.x - this.predictedPosition.x;
+    const dy = this.serverPosition.y - this.predictedPosition.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    if (distance > this.reconciliationThreshold) {
+      // Snap to server position if too far
+      this.predictedPosition.x = this.serverPosition.x;
+      this.predictedPosition.y = this.serverPosition.y;
+    } else if (distance > 0) {
+      // Lerp towards server position
+      this.predictedPosition.x += dx * 0.2;
+      this.predictedPosition.y += dy * 0.2;
     }
+    
+    return this.predictedPosition;
+  }
+  
+  getPosition() {
+    return this.predictedPosition;
+  }
+}
+```
 
-    private void OnProjectileAdd(string projectileId, dynamic projectile)
-    {
-        // Create projectile game object
-        // ...
-    }
+## Best Practices
 
-    private void OnProjectileRemove(string projectileId, dynamic projectile)
-    {
-        // Remove projectile game object
-        // ...
-    }
+### Optimizing Network Traffic
 
-    private void OnGameStarted(object message)
-    {
-        Debug.Log("Game started!");
-    }
+```typescript
+// Only send movement updates when they change
+let lastMovement = { x: 0, y: 0, speed: 0 };
 
-    private void OnGameEnded(object message)
-    {
-        Debug.Log("Game ended!");
-    }
+function optimizedMove(room, x, y, speed) {
+  // Only send if movement has changed
+  if (
+    x !== lastMovement.x ||
+    y !== lastMovement.y ||
+    speed !== lastMovement.speed
+  ) {
+    room.send("move", { x, y, speed });
+    lastMovement = { x, y, speed };
+  }
+}
+```
 
-    private void OnPlayerDied(object message)
-    {
-        Debug.Log("Player died!");
-    }
+### Handling Reconnection
 
-    private void Update()
-    {
-        // Handle player input
-        if (room != null)
-        {
-            // Movement
-            float horizontal = Input.GetAxis("Horizontal");
-            float vertical = Input.GetAxis("Vertical");
-            
-            if (horizontal != 0 || vertical != 0)
-            {
-                room.Send("move", new Dictionary<string, object>() {
-                    { "x", horizontal },
-                    { "y", vertical },
-                    { "speed", 200 }
-                });
-            }
-            
-            // Shooting
-            if (Input.GetMouseButtonDown(0))
-            {
-                // Calculate angle from player to mouse position
-                // ...
-                float angle = 0; // Replace with actual calculation
-                
-                room.Send("shoot", new Dictionary<string, object>() {
-                    { "angle", angle },
-                    { "type", "default" }
-                });
-            }
-            
-            // Abilities
-            if (Input.GetKeyDown(KeyCode.Q))
-            {
-                room.Send("use_ability", new Dictionary<string, object>() {
-                    { "abilityId", "fireball" },
-                    { "targetPosition", new Dictionary<string, object>() {
-                        { "x", 500 },
-                        { "y", 300 }
-                    }}
-                });
-            }
-            
-            // Ready up
-            if (Input.GetKeyDown(KeyCode.R))
-            {
-                room.Send("ready", new Dictionary<string, object>() {
-                    { "ready", true }
-                });
-            }
-        }
+```typescript
+async function handleReconnection(client, roomId, roomType, options) {
+  try {
+    // Try to reconnect to the same room
+    const room = await client.reconnect(roomId);
+    console.log("Successfully reconnected to room:", roomId);
+    return room;
+  } catch (error) {
+    console.error("Failed to reconnect:", error);
+    
+    // If reconnection fails, join a new room
+    try {
+      const newRoom = await client.joinOrCreate(roomType, options);
+      console.log("Joined new room:", newRoom.id);
+      return newRoom;
+    } catch (joinError) {
+      console.error("Failed to join new room:", joinError);
+      throw joinError;
     }
+  }
+}
+```
 
-    private void OnDestroy()
-    {
-        // Leave room when script is destroyed
-        room?.Leave();
+### Debugging
+
+```typescript
+function enableDebugMode(room, $) {
+  // Log all state changes
+  $(room.state).listen("*", (prop, value) => {
+    console.log(`[DEBUG] State property changed: ${prop} =`, value);
+  });
+  
+  // Log all messages
+  const originalOnMessage = room.onMessage;
+  room.onMessage = function(type, callback) {
+    if (type === "*") {
+      originalOnMessage.call(room, "*", (messageType, message) => {
+        console.log(`[DEBUG] Message received: ${messageType} =`, message);
+        callback(messageType, message);
+      });
+    } else {
+      originalOnMessage.call(room, type, (message) => {
+        console.log(`[DEBUG] Message received: ${type} =`, message);
+        callback(message);
+      });
     }
+  };
+  
+  return {
+    disableDebug: () => {
+      room.onMessage = originalOnMessage;
+    }
+  };
 }
 ```
 
 ## Troubleshooting
 
-### Common Issues
+### Common Issues and Solutions
 
-#### Connection Errors
+1. **Connection Issues**
 
-- **Error**: Failed to connect to server
-
-- **Solution**: Check that the server is running and the URL is correct
-- **Solution**: Verify that your firewall isn't blocking the connection
-
-
-
-- **Error**: Room not found
-
-- **Solution**: Make sure you're using the correct room name
-- **Solution**: Check if the room exists on the server
-
-
-
-
-
-#### State Synchronization Issues
-
-- **Error**: Schema mismatch
-
-- **Solution**: Make sure your client-side schema definitions match the server-side schemas
-- **Solution**: Update your client code to match the latest server schema changes
-
-
-
-- **Error**: Undefined properties in state
-
-- **Solution**: Check that you're accessing properties that exist in the schema
-- **Solution**: Use optional chaining (`?.`) when accessing potentially undefined properties
-
-
-
-
-
-#### Authentication Issues
-
-- **Error**: Unauthorized
-
-- **Solution**: Make sure you're providing the correct authentication credentials
-- **Solution**: Check if your authentication token is valid and not expired
-
-
-
-
-
-### Debugging Tips
-
-1. **Enable Debug Logging**:
 
 ```typescript
-// JavaScript/TypeScript
-Colyseus.setDevMode(true);
+function diagnoseConnectionIssues(client) {
+  // Check if WebSocket is supported
+  if (!window.WebSocket) {
+    console.error("WebSocket is not supported in this browser");
+    return false;
+  }
+  
+  // Test connection
+  client.pingService()
+    .then(pong => {
+      console.log("Server is reachable, ping:", pong.ping);
+    })
+    .catch(error => {
+      console.error("Server is unreachable:", error);
+    });
+  
+  return true;
+}
 ```
 
-
-2. **Monitor Network Traffic**:
-
-1. Use browser developer tools (Network tab) to monitor WebSocket traffic
-2. Use Wireshark for more detailed network analysis
+2. **State Synchronization Issues**
 
 
+```typescript
+function validateStateSync(room) {
+  // Check if state exists
+  if (!room.state) {
+    console.error("Room state is undefined");
+    return false;
+  }
+  
+  // Check if expected collections exist
+  const expectedCollections = ["players", "projectiles"];
+  for (const collection of expectedCollections) {
+    if (!room.state[collection]) {
+      console.error(`Expected collection '${collection}' is missing from state`);
+      return false;
+    }
+  }
+  
+  return true;
+}
+```
 
-3. **Check Server Logs**:
-
-1. Look at the server logs for error messages
-2. Increase log verbosity on the server if needed
+3. **Message Handling Issues**
 
 
+```typescript
+function setupMessageLogging(room) {
+  // Track sent messages
+  const originalSend = room.send;
+  room.send = function(type, message) {
+    console.log(`[SENT] ${type}:`, message);
+    return originalSend.call(room, type, message);
+  };
+  
+  // Track received messages
+  room.onMessage("*", (type, message) => {
+    console.log(`[RECEIVED] ${type}:`, message);
+  });
+}
+```
+
+## Complete Example: Integrating with a Game Engine
+
+Here's an example of integrating with a game engine like Phaser:
+
+```typescript
+import { Client, getStateCallbacks } from "colyseus.js";
+import Phaser from "phaser";
+
+class GameScene extends Phaser.Scene {
+  constructor() {
+    super({ key: "GameScene" });
+    this.client = new Client("ws://your-server-address:2567");
+    this.room = null;
+    this.$ = null;
+    this.players = {};
+    this.projectiles = {};
+    this.platforms = [];
+    this.collectibles = [];
+    this.enemies = [];
+    this.localPlayerId = null;
+  }
+  
+  preload() {
+    // Load assets
+    this.load.image("player", "assets/player.png");
+    this.load.image("projectile", "assets/projectile.png");
+    this.load.image("platform", "assets/platform.png");
+    this.load.image("collectible", "assets/collectible.png");
+    this.load.image("enemy", "assets/enemy.png");
+  }
+  
+  async create() {
+    // Connect to room
+    try {
+      this.room = await this.client.joinOrCreate("platformer", {
+        username: "Player" + Math.floor(Math.random() * 1000),
+        characterType: "knight"
+      });
+      
+      this.$ = getStateCallbacks(this.room);
+      this.localPlayerId = this.room.sessionId;
+      
+      // Set up message handlers
+      this.setupMessageHandlers();
+      
+      // Set up state synchronization
+      this.setupStateSynchronization();
+      
+      // Set up input handlers
+      this.setupInputHandlers();
+      
+      console.log("Connected to room:", this.room.id);
+    } catch (error) {
+      console.error("Failed to join room:", error);
+    }
+  }
+  
+  setupMessageHandlers() {
+    this.room.onMessage("level_data", (message) => {
+      // Create level from received data
+      this.createLevel(message);
+    });
+    
+    this.room.onMessage("game_started", () => {
+      // Start game UI and animations
+    });
+    
+    this.room.onMessage("game_ended", (message) => {
+      // Show game over screen with results
+    });
+    
+    // More message handlers...
+  }
+  
+  setupStateSynchronization() {
+    // Track players
+    $(this.room.state).players.onAdd((player, sessionId) => {
+      // Create player sprite
+      this.players[sessionId] = this.createPlayerSprite(player, sessionId);
+      
+      // Listen for position changes
+      $(player).position.listen("x", (value) => {
+        if (this.players[sessionId]) {
+          this.players[sessionId].x = value;
+        }
+      });
+      
+      $(player).position.listen("y", (value) => {
+        if (this.players[sessionId]) {
+          this.players[sessionId].y = value;
+        }
+      });
+      
+      // More property listeners...
+    });
+    
+    $(this.room.state).players.onRemove((player, sessionId) => {
+      // Remove player sprite
+      if (this.players[sessionId]) {
+        this.players[sessionId].destroy();
+        delete this.players[sessionId];
+      }
+    });
+    
+    // Track platforms, collectibles, enemies...
+  }
+  
+  createPlayerSprite(player, sessionId) {
+    const sprite = this.add.sprite(player.position.x, player.position.y, "player");
+    
+    // Set sprite properties based on character type
+    switch (player.characterType) {
+      case "knight":
+        sprite.setTint(0xFF0000);
+        break;
+      case "mage":
+        sprite.setTint(0x0000FF);
+        break;
+      case "rogue":
+        sprite.setTint(0x00FF00);
+        break;
+    }
+    
+    // Add name label
+    const nameText = this.add.text(0, -40, player.name, {
+      fontSize: "16px",
+      fill: "#FFFFFF"
+    });
+    nameText.setOrigin(0.5);
+    
+    // Create container with sprite and text
+    const container = this.add.container(player.position.x, player.position.y, [sprite, nameText]);
+    
+    // Highlight local player
+    if (sessionId === this.localPlayerId) {
+      const highlight = this.add.circle(0, 0, 30, 0xFFFF00, 0.3);
+      container.add(highlight);
+    }
+    
+    return container;
+  }
+  
+  setupInputHandlers() {
+    // Set up keyboard controls
+    this.cursors = this.input.keyboard.createCursorKeys();
+    
+    // Jump key
+    this.input.keyboard.on("keydown-SPACE", () => {
+      this.room.send("jump");
+    });
+    
+    // Attack key
+    this.input.keyboard.on("keydown-Z", () => {
+      this.room.send("attack");
+    });
+    
+    // Ability key
+    this.input.keyboard.on("keydown-X", () => {
+      // Get mouse position for targeted abilities
+      const worldPoint = this.input.activePointer.positionToCamera(this.cameras.main);
+      this.room.send("use_ability", { targetPosition: { x: worldPoint.x, y: worldPoint.y } });
+    });
+  }
+  
+  update() {
+    // Handle movement input
+    if (this.room && this.cursors) {
+      let direction = 0;
+      
+      if (this.cursors.left.isDown) {
+        direction = -1;
+      } else if (this.cursors.right.isDown) {
+        direction = 1;
+      }
+      
+      // Only send if direction changed
+      if (this.lastDirection !== direction) {
+        this.room.send("move", { direction });
+        this.lastDirection = direction;
+      }
+    }
+  }
+  
+  createLevel(levelData) {
+    // Create platforms
+    levelData.platforms.forEach(platformData => {
+      const platform = this.add.sprite(
+        platformData.x,
+        platformData.y,
+        "platform"
+      );
+      platform.displayWidth = platformData.width;
+      platform.displayHeight = platformData.height;
+      this.platforms.push(platform);
+    });
+    
+    // Create collectibles
+    levelData.collectibles.forEach(collectibleData => {
+      const collectible = this.add.sprite(
+        collectibleData.x,
+        collectibleData.y,
+        "collectible"
+      );
+      
+      // Set appearance based on type
+      if (collectibleData.type === "gem") {
+        collectible.setTint(0x00FFFF);
+      } else {
+        collectible.setTint(0xFFFF00);
+      }
+      
+      this.collectibles.push({
+        sprite: collectible,
+        id: collectibleData.id
+      });
+    });
+    
+    // Create enemies
+    levelData.enemies.forEach(enemyData => {
+      const enemy = this.add.sprite(
+        enemyData.x,
+        enemyData.y,
+        "enemy"
+      );
+      
+      // Set appearance based on type
+      if (enemyData.type === "flying") {
+        enemy.setTint(0xFF00FF);
+      } else {
+        enemy.setTint(0xFF0000);
+      }
+      
+      this.enemies.push({
+        sprite: enemy,
+        id: enemyData.id
+      });
+    });
+  }
+}
+```
+
+## Conclusion
+
+This guide covers the essential aspects of implementing a client for our Colyseus v0.16 game server. By following these patterns and examples, you can create robust client applications that interact seamlessly with the server.
+
+Remember to:
+
+1. Use the new `$()` proxy for state callbacks
+2. Implement client-side prediction for smoother gameplay
+3. Handle reconnection scenarios
+4. Optimize network traffic by only sending necessary updates
+5. Add proper error handling and debugging tools
 
 
-
-## API Reference
-
-For a complete API reference, please refer to the official Colyseus documentation:
-
-- [Colyseus Client API](https://docs.colyseus.io/colyseus/client/)
-- [Colyseus Server API](https://docs.colyseus.io/colyseus/server/)
-- [Colyseus Schema API](https://docs.colyseus.io/colyseus/state/schema/)
-
-
-## Contributing
-
-If you find any issues or have suggestions for improving this integration guide, please submit an issue or pull request to our repository.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+For more information, refer to the [official Colyseus documentation](https://docs.colyseus.io/).
