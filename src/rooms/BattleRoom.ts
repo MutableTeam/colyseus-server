@@ -1,18 +1,20 @@
 import { Room, type Client } from "colyseus"
-import { BattleState } from "../schemas/BattleState"
+import { BattleState, MapObject } from "../schemas/BattleState"
 import { Player } from "../schemas/Player"
 import { Projectile } from "../schemas/Projectile"
 import { AbilityManager } from "../managers/AbilityManager"
 import { CollisionManager } from "../managers/CollisionManager"
-import { StateView } from "@colyseus/schema"
+import { Vector3D } from "../schemas/Vector3D"
 
-export class BattleRoom extends Room {
-  maxClients = 8
+export class BattleRoom extends Room<BattleState> {
+  maxClients = 16
 
   // Game settings
-  private mapWidth = 2000
-  private mapHeight = 2000
-  private tickRate = 20 // 20 updates per second
+  private mapWidth = 100
+  private mapLength = 100
+  private mapHeight = 50
+  private gravity = 9.8
+  private tickRate = 60 // 60 updates per second for smooth Three.js rendering
   private abilityManager: AbilityManager
   private collisionManager: CollisionManager
 
@@ -21,14 +23,27 @@ export class BattleRoom extends Room {
 
     // Set map dimensions from options or use defaults
     this.mapWidth = options.mapWidth || this.mapWidth
+    this.mapLength = options.mapLength || this.mapLength
     this.mapHeight = options.mapHeight || this.mapHeight
+    this.gravity = options.gravity || this.gravity
 
     // Initialize the room state
-    this.state = new BattleState(this.mapWidth, this.mapHeight)
+    this.state = new BattleState(this.mapWidth, this.mapLength, this.mapHeight)
+    this.state.gravity = this.gravity
+
+    // Set game mode
+    this.state.gameMode = options.gameMode || "deathmatch"
+
+    // Set environment settings
+    this.state.timeOfDay = options.timeOfDay || "day"
+    this.state.weather = options.weather || "clear"
 
     // Initialize managers
     this.abilityManager = new AbilityManager()
     this.collisionManager = new CollisionManager()
+
+    // Load map objects
+    this.loadMapObjects(options.mapId || "default")
 
     // Set up physics simulation
     this.setSimulationInterval((deltaTime) => this.update(deltaTime), 1000 / this.tickRate)
@@ -38,10 +53,35 @@ export class BattleRoom extends Room {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
-      // Update player's movement direction and speed
+      // Update player's movement direction
       player.moveDirection.x = message.x || 0
       player.moveDirection.y = message.y || 0
-      player.speed = message.speed || player.speed
+      player.moveDirection.z = message.z || 0
+
+      // Update player's rotation (if provided)
+      if (message.rotation) {
+        player.rotation.x = message.rotation.x || 0
+        player.rotation.y = message.rotation.y || 0
+        player.rotation.z = message.rotation.z || 0
+        player.rotation.w = message.rotation.w || 1
+      }
+
+      // Update animation state
+      if (player.moveDirection.x !== 0 || player.moveDirection.z !== 0) {
+        player.animationState = player.isGrounded ? "running" : "jumping"
+      } else {
+        player.animationState = player.isGrounded ? "idle" : "jumping"
+      }
+    })
+
+    // Handle player jumping
+    this.onMessage("jump", (client) => {
+      const player = this.state.players.get(client.sessionId)
+      if (!player || !player.isGrounded) return
+
+      player.velocity.y = player.jumpForce
+      player.isGrounded = false
+      player.animationState = "jumping"
     })
 
     // Handle player shooting
@@ -51,9 +91,14 @@ export class BattleRoom extends Room {
 
       // Check if player can shoot (cooldown)
       if (player.canShoot()) {
-        const projectile = this.createProjectile(player, message.angle, message.type)
+        const direction = new Vector3D(message.direction.x || 0, message.direction.y || 0, message.direction.z || 0)
+
+        const projectile = this.createProjectile(player, direction, message.type)
         this.state.projectiles.set(projectile.id, projectile)
         player.lastShotTime = Date.now()
+
+        // Set animation state
+        player.animationState = "shooting"
       }
     })
 
@@ -62,8 +107,17 @@ export class BattleRoom extends Room {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
-      // The canUseAbility check should be done within the abilityManager.useAbility function
-      this.abilityManager.useAbility(this, player, message.abilityId, message.targetPosition)
+      let targetPosition = null
+      if (message.targetPosition) {
+        targetPosition = new Vector3D(
+          message.targetPosition.x || 0,
+          message.targetPosition.y || 0,
+          message.targetPosition.z || 0,
+        )
+      }
+
+      // Call useAbility outside of conditional logic
+      this.abilityManager.useAbility(this, player, message.abilityId, targetPosition)
     })
 
     // Handle player changing character
@@ -72,12 +126,14 @@ export class BattleRoom extends Room {
       if (!player || this.state.gameStarted) return // Can't change after game starts
 
       player.characterType = message.characterType
+      player.modelType = message.modelType || player.characterType
       player.abilities = this.abilityManager.getAbilitiesForCharacter(message.characterType)
 
       // Broadcast character change to all clients
       this.broadcast("character_changed", {
         playerId: client.sessionId,
         characterType: message.characterType,
+        modelType: player.modelType,
       })
     })
 
@@ -101,17 +157,16 @@ export class BattleRoom extends Room {
     player.id = client.sessionId
     player.name = options.username || `Player_${client.sessionId.substr(0, 6)}`
     player.characterType = options.characterType || "default"
+    player.modelType = options.modelType || player.characterType
 
     // Set initial position (random within the map)
-    player.position.x = Math.random() * this.mapWidth
-    player.position.y = Math.random() * this.mapHeight
+    const spawnPoint = this.getRandomSpawnPoint()
+    player.position.x = spawnPoint.x
+    player.position.y = spawnPoint.y
+    player.position.z = spawnPoint.z
 
     // Set abilities based on character type
     player.abilities = this.abilityManager.getAbilitiesForCharacter(player.characterType)
-
-    // Create a StateView for this client
-    client.view = new StateView()
-    client.view.add(player)
 
     // Add player to the game state
     this.state.players.set(client.sessionId, player)
@@ -121,6 +176,12 @@ export class BattleRoom extends Room {
       id: player.id,
       name: player.name,
       characterType: player.characterType,
+      modelType: player.modelType,
+      position: {
+        x: player.position.x,
+        y: player.position.y,
+        z: player.position.z,
+      },
     })
   }
 
@@ -147,35 +208,123 @@ export class BattleRoom extends Room {
     // Convert to seconds for physics calculations
     const dt = deltaTime / 1000
 
+    // Skip updates if game hasn't started
+    if (!this.state.gameStarted) return
+
     // Update player positions
     this.state.players.forEach((player) => {
       // Skip dead players
-      if (player.health <= 0) return
+      if (player.health <= 0) {
+        if (!player.isRespawning) {
+          player.isRespawning = true
 
-      // Update position based on movement direction and speed
-      player.position.x += player.moveDirection.x * player.speed * dt
-      player.position.y += player.moveDirection.y * player.speed * dt
+          // Schedule respawn
+          this.clock.setTimeout(() => {
+            this.respawnPlayer(player)
+          }, player.respawnTime * 1000)
+        }
+        return
+      }
 
-      // Keep player within map boundaries
-      player.position.x = Math.max(0, Math.min(this.mapWidth, player.position.x))
-      player.position.y = Math.max(0, Math.min(this.mapHeight, player.position.y))
+      // Apply gravity if not grounded
+      if (!player.isGrounded) {
+        player.velocity.y -= this.gravity * dt
+      }
+
+      // Calculate movement based on direction and speed
+      const moveSpeed = player.speed
+
+      // Apply movement in the direction the player is facing
+      const forward = player.getForwardVector()
+
+      // Calculate velocity from input direction and forward vector
+      if (player.moveDirection.x !== 0 || player.moveDirection.z !== 0) {
+        // This is a simplified movement calculation
+        // In a real implementation, you would use the rotation quaternion
+        // to transform the input direction
+        player.velocity.x = player.moveDirection.x * moveSpeed
+        player.velocity.z = player.moveDirection.z * moveSpeed
+      } else {
+        // Decelerate when no input
+        player.velocity.x *= 0.9
+        player.velocity.z *= 0.9
+
+        // Stop completely below threshold
+        if (Math.abs(player.velocity.x) < 0.1) player.velocity.x = 0
+        if (Math.abs(player.velocity.z) < 0.1) player.velocity.z = 0
+      }
+
+      // Update position based on velocity
+      player.position.x += player.velocity.x * dt
+      player.position.y += player.velocity.y * dt
+      player.position.z += player.velocity.z * dt
+
+      // Check map boundaries
+      if (player.position.x < 0) {
+        player.position.x = 0
+        player.velocity.x = 0
+      } else if (player.position.x > this.mapWidth) {
+        player.position.x = this.mapWidth
+        player.velocity.x = 0
+      }
+
+      if (player.position.z < 0) {
+        player.position.z = 0
+        player.velocity.z = 0
+      } else if (player.position.z > this.mapLength) {
+        player.position.z = this.mapLength
+        player.velocity.z = 0
+      }
+
+      // Check floor collision
+      if (player.position.y < player.radius) {
+        player.position.y = player.radius
+        player.velocity.y = 0
+        player.isGrounded = true
+      } else {
+        // Check if still on ground
+        player.isGrounded = this.collisionManager.checkPlayerGround(player, 0)
+      }
+
+      // Check ceiling collision
+      if (player.position.y > this.mapHeight - player.radius) {
+        player.position.y = this.mapHeight - player.radius
+        player.velocity.y = 0
+      }
+
+      // Check collisions with map objects
+      this.state.mapObjects.forEach((mapObject) => {
+        if (this.collisionManager.checkPlayerMapObjectCollision(player, mapObject)) {
+          this.collisionManager.resolveCollision(player, mapObject)
+        }
+      })
 
       // Update cooldowns
       player.updateCooldowns()
+
+      // Check if player fell out of the map
+      if (player.position.y > this.mapHeight + 10) {
+        // Player fell out of the map, respawn
+        player.health = 0
+        this.handlePlayerDeath(player, "")
+      }
     })
 
     // Update projectiles
     this.state.projectiles.forEach((projectile) => {
+      // Apply gravity if projectile is affected by it
+      if (projectile.gravity > 0) {
+        projectile.velocity.y -= projectile.gravity * dt
+      }
+
       // Update position based on velocity
       projectile.position.x += projectile.velocity.x * dt
       projectile.position.y += projectile.velocity.y * dt
+      projectile.position.z += projectile.velocity.z * dt
 
       // Check if projectile is out of bounds
       if (
-        projectile.position.x < 0 ||
-        projectile.position.x > this.mapWidth ||
-        projectile.position.y < 0 ||
-        projectile.position.y > this.mapHeight
+        !this.collisionManager.isWithinMapBoundaries(projectile.position, this.mapWidth, this.mapLength, this.mapHeight)
       ) {
         this.state.projectiles.delete(projectile.id)
         return
@@ -188,15 +337,64 @@ export class BattleRoom extends Room {
         return
       }
 
+      // Check collisions with map objects
+      for (const mapObject of this.state.mapObjects) {
+        // Simple collision check - in a real implementation you would use
+        // more sophisticated collision detection based on the shape of the map object
+        const dx = projectile.position.x - mapObject.position.x
+        const dy = projectile.position.y - mapObject.position.y
+        const dz = projectile.position.z - mapObject.position.z
+
+        // Simple sphere vs box collision
+        if (
+          Math.abs(dx) < mapObject.scale.x / 2 + projectile.radius &&
+          Math.abs(dy) < mapObject.scale.y / 2 + projectile.radius &&
+          Math.abs(dz) < mapObject.scale.z / 2 + projectile.radius
+        ) {
+          // Projectile hit map object
+          this.state.projectiles.delete(projectile.id)
+
+          // Broadcast projectile impact
+          this.broadcast("projectile_impact", {
+            projectileId: projectile.id,
+            position: {
+              x: projectile.position.x,
+              y: projectile.position.y,
+              z: projectile.position.z,
+            },
+            normal: {
+              x: dx > 0 ? 1 : -1,
+              y: dy > 0 ? 1 : -1,
+              z: dz > 0 ? 1 : -1,
+            },
+            objectId: mapObject.id,
+          })
+
+          return
+        }
+      }
+
       // Check collisions with players
       this.state.players.forEach((player) => {
         // Skip if it's the player who shot the projectile or if player is dead
-        if (player.id === projectile.ownerId || player.health <= 0) return
+        if (player.id === projectile.ownerId || player.health <= 0 || player.isRespawning) return
 
         // Check collision
-        if (this.collisionManager.checkCollision(projectile, player)) {
+        if (this.collisionManager.checkProjectilePlayerCollision(projectile, player)) {
           // Apply damage to player
           player.health -= projectile.damage
+
+          // Broadcast projectile hit
+          this.broadcast("projectile_hit", {
+            projectileId: projectile.id,
+            playerId: player.id,
+            damage: projectile.damage,
+            position: {
+              x: projectile.position.x,
+              y: projectile.position.y,
+              z: projectile.position.z,
+            },
+          })
 
           // Check if player died
           if (player.health <= 0) {
@@ -220,43 +418,70 @@ export class BattleRoom extends Room {
     }
   }
 
-  private createProjectile(player: Player, angle: number, type: string): Projectile {
+  private createProjectile(player: Player, direction: Vector3D, type: string): Projectile {
     const projectile = new Projectile()
     projectile.id = `${player.id}_${Date.now()}`
     projectile.ownerId = player.id
     projectile.type = type || "default"
 
-    // Set initial position (at player position)
+    // Set initial position (at player position, adjusted for height)
     projectile.position.x = player.position.x
-    projectile.position.y = player.position.y
+    projectile.position.y = player.position.y + 1.5 // Adjust for player height
+    projectile.position.z = player.position.z
 
-    // Set velocity based on angle
-    const speed = 500 // pixels per second
-    projectile.velocity.x = Math.cos(angle) * speed
-    projectile.velocity.y = Math.sin(angle) * speed
+    // Normalize direction
+    const length = direction.length()
+    if (length > 0) {
+      direction.x /= length
+      direction.y /= length
+      direction.z /= length
+    } else {
+      // Default to forward if no direction provided
+      const forward = player.getForwardVector()
+      direction.x = forward.x
+      direction.y = 0
+      direction.z = forward.z
+    }
 
     // Set properties based on projectile type
     switch (projectile.type) {
       case "fireball":
         projectile.damage = 20
-        projectile.radius = 10
+        projectile.radius = 0.8
         projectile.lifetime = 2
+        projectile.speed = 20
+        projectile.gravity = 0
+        projectile.effectType = "fire"
         break
       case "arrow":
         projectile.damage = 15
-        projectile.radius = 5
+        projectile.radius = 0.3
         projectile.lifetime = 1.5
+        projectile.speed = 30
+        projectile.gravity = 5 // Arrows are affected by gravity
+        projectile.effectType = "pierce"
         break
       case "laser":
         projectile.damage = 10
-        projectile.radius = 3
+        projectile.radius = 0.2
         projectile.lifetime = 1
+        projectile.speed = 50
+        projectile.gravity = 0
+        projectile.effectType = "energy"
         break
       default:
         projectile.damage = 10
-        projectile.radius = 5
+        projectile.radius = 0.5
         projectile.lifetime = 2
+        projectile.speed = 25
+        projectile.gravity = 0
+        projectile.effectType = "default"
     }
+
+    // Set velocity based on direction and speed
+    projectile.velocity.x = direction.x * projectile.speed
+    projectile.velocity.y = direction.y * projectile.speed
+    projectile.velocity.z = direction.z * projectile.speed
 
     return projectile
   }
@@ -266,6 +491,11 @@ export class BattleRoom extends Room {
     this.broadcast("player_died", {
       playerId: player.id,
       killerId: killerId,
+      position: {
+        x: player.position.x,
+        y: player.position.y,
+        z: player.position.z,
+      },
     })
 
     // Update kill count for killer
@@ -278,6 +508,92 @@ export class BattleRoom extends Room {
 
     // Check if game should end
     this.checkGameEnd()
+  }
+
+  private respawnPlayer(player: Player) {
+    // Reset player state
+    player.health = player.maxHealth
+    player.isRespawning = false
+
+    // Get spawn point
+    const spawnPoint = this.getRandomSpawnPoint()
+    player.position.x = spawnPoint.x
+    player.position.y = spawnPoint.y
+    player.position.z = spawnPoint.z
+
+    // Reset velocity
+    player.velocity.x = 0
+    player.velocity.y = 0
+    player.velocity.z = 0
+
+    // Reset animation state
+    player.animationState = "idle"
+
+    // Broadcast player respawned
+    this.broadcast("player_respawned", {
+      playerId: player.id,
+      position: {
+        x: player.position.x,
+        y: player.position.y,
+        z: player.position.z,
+      },
+    })
+  }
+
+  private getRandomSpawnPoint(): Vector3D {
+    // In a real implementation, you would have predefined spawn points
+    // For now, we'll just return a random position within the map
+    return new Vector3D(
+      Math.random() * this.mapWidth,
+      5, // Start a bit above the ground
+      Math.random() * this.mapLength,
+    )
+  }
+
+  private loadMapObjects(mapId: string) {
+    // In a real implementation, you would load map data from a database or file
+    // For this example, we'll create a simple map with some objects
+
+    // Add ground
+    const ground = new MapObject()
+    ground.id = "ground"
+    ground.type = "ground"
+    ground.position.x = this.mapWidth / 2
+    ground.position.y = 0
+    ground.position.z = this.mapLength / 2
+    ground.scale.x = this.mapWidth
+    ground.scale.y = 1
+    ground.scale.z = this.mapLength
+    this.state.mapObjects.push(ground)
+
+    // Add some platforms
+    for (let i = 0; i < 10; i++) {
+      const platform = new MapObject()
+      platform.id = `platform_${i}`
+      platform.type = "platform"
+      platform.position.x = Math.random() * this.mapWidth
+      platform.position.y = Math.random() * (this.mapHeight / 2) + 5
+      platform.position.z = Math.random() * this.mapLength
+      platform.scale.x = Math.random() * 10 + 5
+      platform.scale.y = 1
+      platform.scale.z = Math.random() * 10 + 5
+      this.state.mapObjects.push(platform)
+    }
+
+    // Add some walls
+    for (let i = 0; i < 5; i++) {
+      const wall = new MapObject()
+      wall.id = `wall_${i}`
+      wall.type = "wall"
+      wall.position.x = Math.random() * this.mapWidth
+      wall.position.y = 5
+      wall.position.z = Math.random() * this.mapLength
+      wall.scale.x = 1
+      wall.scale.y = 10
+      wall.scale.z = Math.random() * 20 + 10
+      wall.rotation = Math.random() * Math.PI * 2
+      this.state.mapObjects.push(wall)
+    }
   }
 
   private checkGameStart() {
@@ -306,32 +622,25 @@ export class BattleRoom extends Room {
     this.state.gameStartTime = Date.now()
 
     // Reset player positions to spawn points
-    let spawnIndex = 0
-    const spawnPoints = [
-      { x: 100, y: 100 },
-      { x: this.mapWidth - 100, y: 100 },
-      { x: 100, y: this.mapHeight - 100 },
-      { x: this.mapWidth - 100, y: this.mapHeight - 100 },
-      { x: this.mapWidth / 2, y: 100 },
-      { x: this.mapWidth / 2, y: this.mapHeight - 100 },
-      { x: 100, y: this.mapHeight / 2 },
-      { x: this.mapWidth - 100, y: this.mapHeight / 2 },
-    ]
-
     this.state.players.forEach((player) => {
-      const spawn = spawnPoints[spawnIndex % spawnPoints.length]
-      player.position.x = spawn.x
-      player.position.y = spawn.y
-      player.health = 100 // Reset health
-      player.kills = 0 // Reset kills
-      spawnIndex++
+      const spawnPoint = this.getRandomSpawnPoint()
+      player.position.x = spawnPoint.x
+      player.position.y = spawnPoint.y
+      player.position.z = spawnPoint.z
+      player.health = player.maxHealth
+      player.kills = 0
+      player.animationState = "idle"
     })
 
     // Broadcast game start
     this.broadcast("game_started", {
       mapWidth: this.mapWidth,
+      mapLength: this.mapLength,
       mapHeight: this.mapHeight,
       maxGameTime: this.state.maxGameTime,
+      gameMode: this.state.gameMode,
+      timeOfDay: this.state.timeOfDay,
+      weather: this.state.weather,
     })
   }
 

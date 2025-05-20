@@ -41,29 +41,29 @@ export class LobbyState extends Schema {
     return false
   }
 
- removePlayerFromGame(gameId: string, playerId: string) {
-  const game = this.availableGames.get(gameId)
-  if (game && game.playerIds.has(playerId)) {
-    game.playerIds.delete(playerId)
-    game.currentPlayers--
+  removePlayerFromGame(gameId: string, playerId: string) {
+    const game = this.availableGames.get(gameId)
+    if (game && game.playerIds.has(playerId)) {
+      game.playerIds.delete(playerId)
+      game.currentPlayers--
 
-    // If game is empty, remove it
-    if (game.currentPlayers === 0) {
-      this.availableGames.delete(gameId)
-    }
-    // If creator left, assign a new creator
-    else if (playerId === game.creatorId) {
-      // Get the keys as an array of strings
-      const playerIdsArray = Array.from(game.playerIds.keys()) as string[];
-      if (playerIdsArray.length > 0) {
-        game.creatorId = playerIdsArray[0];
+      // If game is empty, remove it
+      if (game.currentPlayers === 0) {
+        this.availableGames.delete(gameId)
       }
-    }
+      // If creator left, assign a new creator
+      else if (playerId === game.creatorId) {
+        // Get the keys as an array of strings
+        const playerIdsArray = Array.from(game.playerIds.keys()) as string[]
+        if (playerIdsArray.length > 0) {
+          game.creatorId = playerIdsArray[0]
+        }
+      }
 
-    return true
+      return true
+    }
+    return false
   }
-  return false
-}
 
   removePlayerFromAllGames(playerId: string) {
     this.availableGames.forEach((game, gameId) => {
@@ -98,5 +98,38 @@ export class LobbyState extends Schema {
         this.availableGames.delete(gameId)
       }
     })
+  }
+
+  getActiveLobbiesByGameType(gameType: string) {
+    const activeLobbies: GameListing[] = []
+
+    this.availableGames.forEach((game) => {
+      // Check if the game matches the requested type and isn't locked
+      if (game.type === gameType && !game.locked && game.currentPlayers < game.maxPlayers) {
+        activeLobbies.push(game)
+      }
+    })
+
+    // Sort by creation time (newest first)  {
+        activeLobbies.push(game)
+      }
+    })
+
+    // Sort by creation time (newest first)
+    return activeLobbies.sort((a, b) => b.createdAt - a.createdAt)
+  }
+
+  getAllActiveLobbies() {
+    const activeLobbies: GameListing[] = []
+
+    this.availableGames.forEach((game) => {
+      // Only include games that aren't locked and have space
+      if (!game.locked && game.currentPlayers < game.maxPlayers) {
+        activeLobbies.push(game)
+      }
+    })
+
+    // Sort by creation time (newest first)
+    return activeLobbies.sort((a, b) => b.createdAt - a.createdAt)
   }
 }

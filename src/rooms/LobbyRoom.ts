@@ -1,6 +1,5 @@
 import { Room, type Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
-import { StateView } from "@colyseus/schema"
 
 export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
@@ -48,6 +47,28 @@ export class LobbyRoom extends Room<LobbyState> {
       })
     })
 
+    // Handle request for active lobbies by game type
+    this.onMessage("get_active_lobbies", (client, message) => {
+      const { gameType } = message
+
+      let activeLobbies
+      if (gameType) {
+        // Get lobbies for specific game type
+        activeLobbies = this.state.getActiveLobbiesByGameType(gameType)
+      } else {
+        // Get all active lobbies
+        activeLobbies = this.state.getAllActiveLobbies()
+      }
+
+      // Send the filtered lobbies to the requesting client
+      client.send("active_lobbies", {
+        lobbies: activeLobbies,
+        gameType: gameType || "all",
+      })
+
+      console.log(`Sent ${activeLobbies.length} active lobbies to player ${client.sessionId}`)
+    })
+
     // Set up periodic cleanup of stale games
     this.setSimulationInterval(() => {
       this.state.cleanupStaleGames()
@@ -57,9 +78,6 @@ export class LobbyRoom extends Room<LobbyState> {
   onJoin(client: Client, options: any) {
     console.log(`Player ${client.sessionId} joined the lobby`)
     this.state.addPlayer(client.sessionId, options.username || `Player_${client.sessionId.substr(0, 6)}`)
-
-    // Create a StateView for this client
-    client.view = new StateView()
 
     // Send current state to the new player
     client.send("lobby_state", {
