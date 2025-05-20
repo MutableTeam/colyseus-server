@@ -1,1187 +1,2475 @@
-### Colyseus Client Implementation Guide
-
-This README provides a comprehensive guide for implementing client-side code to interact with our Colyseus v0.16 game server.
-
-## Table of Contents
-
-1. [Installation](#installation)
-2. [Connecting to the Server](#connecting-to-the-server)
-3. [Room Types](#room-types)
-
-1. [Lobby Room](#lobby-room)
-2. [Battle Room](#battle-room)
-3. [Race Room](#race-room)
-4. [Platformer Room](#platformer-room)
-
-
-
-4. [Schema Synchronization](#schema-synchronization)
-5. [Handling Game Events](#handling-game-events)
-6. [Working with Abilities](#working-with-abilities)
-7. [Client-Side Prediction](#client-side-prediction)
-8. [Best Practices](#best-practices)
-9. [Troubleshooting](#troubleshooting)
-
-
-## Installation
-
-First, install the Colyseus client library:
-
-```shellscript
-npm install colyseus.js@0.16.0
-```
-
 ## Connecting to the Server
 
+Create a client connection manager:
+
 ```typescript
-import { Client, getStateCallbacks } from "colyseus.js";
+// client/src/services/ColyseusClient.ts
+import { Client, Room } from "colyseus.js";
 
-// Create a client instance
-const client = new Client("ws://your-server-address:2567");
+export class ColyseusClient {
+  private static instance: ColyseusClient;
+  private client: Client;
+  
+  private constructor(endpoint: string) {
+    this.client = new Client(endpoint);
+  }
+  
+  public static getInstance(endpoint: string = "ws://localhost:2567"): ColyseusClient {
+    if (!ColyseusClient.instance) {
+      ColyseusClient.instance = new ColyseusClient(endpoint);
+    }
+    return ColyseusClient.instance;
+  }
+  
+  public getClient(): Client {
+    return this.client;
+  }
+  
+  public async joinOrCreate<T>(roomName: string, options: any = {}): Promise<Room<T>> {
+    try {
+      return await this.client.joinOrCreate<T>(roomName, options);
+    } catch (error) {
+      console.error(`Error joining/creating room ${roomName}:`, error);
+      throw error;
+    }
+  }
+  
+  public async join<T>(roomId: string, options: any = {}): Promise<Room<T>> {
+    try {
+      return await this.client.join<T>(roomId, options);
+    } catch (error) {
+      console.error(`Error joining room ${roomId}:`, error);
+      throw error;
+    }
+  }
+}
 
-// Connect to a room
-async function connectToRoom() {
-  try {
-    // Join a room by name
-    const room = await client.joinOrCreate("lobby", {
-      username: "PlayerName",
-      // Additional options can be passed here
+// Usage
+const colyseusClient = ColyseusClient.getInstance();
+```
+
+## Lobby System Implementation
+
+### Joining the Lobby
+
+```typescript
+// client/src/services/LobbyService.ts
+import { Room } from "colyseus.js";
+import { ColyseusClient } from "./ColyseusClient";
+
+export interface LobbyState {
+  players: Map<string, Player>;
+  availableGames: Map<string, GameListing>;
+}
+
+export interface Player {
+  id: string;
+  name: string;
+}
+
+export interface GameListing {
+  id: string;
+  type: string;
+  name: string;
+  maxPlayers: number;
+  currentPlayers: number;
+  creatorId: string;
+  createdAt: number;
+  locked: boolean;
+  playerIds: Map<string, string>;
+}
+
+export class LobbyService {
+  private room: Room<LobbyState> | null = null;
+  private username: string = "";
+  
+  constructor(private colyseusClient: ColyseusClient) {}
+  
+  public async joinLobby(username: string): Promise<Room<LobbyState>> {
+    this.username = username;
+    
+    try {
+      this.room = await this.colyseusClient.joinOrCreate<LobbyState>("lobby", { username });
+      this.setupLobbyListeners();
+      return this.room;
+    } catch (error) {
+      console.error("Error joining lobby:", error);
+      throw error;
+    }
+  }
+  
+  private setupLobbyListeners() {
+    if (!this.room) return;
+    
+    // Listen for state changes
+    this.room.onStateChange((state) => {
+      console.log("Lobby state updated:", state);
     });
     
-    console.log("Connected to room:", room.id);
+    // Listen for specific messages
+    this.room.onMessage("lobby_state", (message) => {
+      console.log("Received initial lobby state:", message);
+    });
     
-    // Set up state callbacks (new in v0.16)
-    const $ = getStateCallbacks(room);
+    this.room.onMessage("game_created", (message) => {
+      console.log("New game created:", message);
+    });
     
-    return { room, $ };
-  } catch (error) {
-    console.error("Failed to join room:", error);
+    this.room.onMessage("player_left_game", (message) => {
+      console.log("Player left game:", message);
+    });
+    
+    this.room.onMessage("active_lobbies", (message) => {
+      console.log("Received active lobbies:", message);
+    });
+    
+    // Handle errors and disconnections
+    this.room.onError((code, message) => {
+      console.error(`Lobby room error (${code}):`, message);
+    });
+    
+    this.room.onLeave((code) => {
+      console.log(`Left lobby room (code: ${code})`);
+      this.room = null;
+    });
+  }
+  
+  public getLobbyRoom(): Room<LobbyState> | null {
+    return this.room;
   }
 }
 ```
 
-## Room Types
-
-### Lobby Room
-
-The Lobby Room is used for matchmaking and creating games.
+### Creating Games
 
 ```typescript
-async function joinLobby() {
-  const { room, $ } = await connectToRoom("lobby", { username: "Player1" });
+// client/src/services/LobbyService.ts (continued)
+export class LobbyService {
+  // ... previous code
   
-  // Listen for available games
-  room.onMessage("lobby_state", (message) => {
-    console.log("Available games:", message.availableGames);
-    console.log("Players in lobby:", message.players);
-  });
-  
-  // Listen for new games being created
-  room.onMessage("game_created", (message) => {
-    console.log("New game created:", message);
-  });
-  
-  // Create a new game
-  function createGame(gameType, gameName, maxPlayers) {
-    room.send("create_game", { gameType, gameName, maxPlayers });
-  }
-  
-  // Join an existing game
-  function joinGame(gameId, gameType) {
-    room.send("join_game", { gameId, gameType });
-  }
-  
-  // Leave a game
-  function leaveGame(gameId) {
-    room.send("leave_game", { gameId });
-  }
-  
-  // Listen for state changes
-  $(room.state).availableGames.onAdd((game, key) => {
-    console.log("Game added:", key, game);
+  public createGame(gameType: string, gameName: string, maxPlayers: number): void {
+    if (!this.room) {
+      throw new Error("Not connected to lobby");
+    }
     
-    // Listen for changes to this game
-    $(game).listen("currentPlayers", (value) => {
-      console.log(`Game ${key} now has ${value} players`);
+    this.room.send("create_game", {
+      gameType,
+      gameName,
+      maxPlayers
     });
-  });
+  }
+}
+
+// Usage example
+const colyseusClient = ColyseusClient.getInstance();
+const lobbyService = new LobbyService(colyseusClient);
+
+// Join the lobby
+await lobbyService.joinLobby("PlayerName");
+
+// Create a new battle game
+lobbyService.createGame("battle", "My Battle Game", 8);
+```
+
+### Listing Active Lobbies
+
+```typescript
+// client/src/services/LobbyService.ts (continued)
+export class LobbyService {
+  // ... previous code
   
-  $(room.state).availableGames.onRemove((game, key) => {
-    console.log("Game removed:", key);
-  });
+  private activeLobbies: GameListing[] = [];
+  private onActiveLobbiesUpdate: ((lobbies: GameListing[]) => void) | null = null;
   
-  $(room.state).players.onAdd((player, sessionId) => {
-    console.log("Player joined lobby:", sessionId, player.name);
-  });
+  public requestActiveLobbies(gameType?: string): void {
+    if (!this.room) {
+      throw new Error("Not connected to lobby");
+    }
+    
+    this.room.send("get_active_lobbies", { gameType });
+  }
   
-  $(room.state).players.onRemove((player, sessionId) => {
-    console.log("Player left lobby:", sessionId);
-  });
+  public setActiveLobbiesListener(callback: (lobbies: GameListing[]) => void): void {
+    this.onActiveLobbiesUpdate = callback;
+    
+    if (this.room) {
+      this.room.onMessage("active_lobbies", (message) => {
+        this.activeLobbies = message.lobbies;
+        if (this.onActiveLobbiesUpdate) {
+          this.onActiveLobbiesUpdate(this.activeLobbies);
+        }
+      });
+    }
+  }
   
-  return { room, $, createGame, joinGame, leaveGame };
+  public getActiveLobbies(): GameListing[] {
+    return this.activeLobbies;
+  }
+}
+
+// Usage example
+lobbyService.setActiveLobbiesListener((lobbies) => {
+  console.log("Updated active lobbies:", lobbies);
+  // Update UI with the list of lobbies
+});
+
+// Request all active lobbies
+lobbyService.requestActiveLobbies();
+
+// Request only battle game lobbies
+lobbyService.requestActiveLobbies("battle");
+```
+
+### Joining Games
+
+```typescript
+// client/src/services/LobbyService.ts (continued)
+export class LobbyService {
+  // ... previous code
+  
+  public joinGame(gameId: string, gameType: string): void {
+    if (!this.room) {
+      throw new Error("Not connected to lobby");
+    }
+    
+    this.room.send("join_game", { gameId, gameType });
+  }
+  
+  public leaveGame(gameId: string): void {
+    if (!this.room) {
+      throw new Error("Not connected to lobby");
+    }
+    
+    this.room.send("leave_game", { gameId });
+  }
 }
 ```
 
-### Battle Room
+## Battle Game Implementation
 
-The Battle Room is for real-time combat gameplay.
+### Three.js Integration
+
+First, set up a basic Three.js scene:
 
 ```typescript
-async function joinBattleRoom(options = {}) {
-  const { room, $ } = await connectToRoom("battle", {
-    username: "Warrior1",
-    characterType: "warrior", // warrior, mage, archer, rogue, healer
-    ...options
-  });
+// client/src/game/BattleScene.ts
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+
+export class BattleScene {
+  private scene: THREE.Scene;
+  private camera: THREE.PerspectiveCamera;
+  private renderer: THREE.WebGLRenderer;
+  private controls: OrbitControls;
+  private clock: THREE.Clock;
   
-  // Listen for game state changes
-  room.onMessage("game_started", (message) => {
-    console.log("Battle started!", message);
-  });
+  private players: Map<string, THREE.Object3D> = new Map();
+  private projectiles: Map<string, THREE.Object3D> = new Map();
+  private mapObjects: Map<string, THREE.Object3D> = new Map();
   
-  room.onMessage("game_ended", (message) => {
-    console.log("Battle ended!", message);
-    console.log("Winner:", message.winnerId);
-    console.log("Player stats:", message.playerStats);
-  });
-  
-  room.onMessage("player_joined", (message) => {
-    console.log("Player joined:", message);
-  });
-  
-  room.onMessage("player_left", (message) => {
-    console.log("Player left:", message.id);
-  });
-  
-  room.onMessage("player_died", (message) => {
-    console.log("Player died:", message.playerId, "killed by:", message.killerId);
-  });
-  
-  room.onMessage("ability_used", (message) => {
-    console.log("Ability used:", message);
-  });
-  
-  room.onMessage("character_changed", (message) => {
-    console.log("Character changed:", message);
-  });
-  
-  // Player actions
-  function move(x, y, speed) {
-    room.send("move", { x, y, speed });
-  }
-  
-  function shoot(angle, type = "default") {
-    room.send("shoot", { angle, type });
-  }
-  
-  function useAbility(abilityId, targetPosition = null) {
-    room.send("use_ability", { abilityId, targetPosition });
-  }
-  
-  function changeCharacter(characterType) {
-    room.send("change_character", { characterType });
-  }
-  
-  function setReady(ready = true) {
-    room.send("ready", { ready });
-  }
-  
-  // State synchronization
-  $(room.state).players.onAdd((player, sessionId) => {
-    console.log("Player added to state:", sessionId);
+  constructor(private container: HTMLElement) {
+    // Initialize Three.js scene
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x87ceeb); // Sky blue
     
-    // Track player position changes
-    $(player).position.listen("x", (value, previousValue) => {
-      console.log(`Player ${sessionId} moved X: ${previousValue} -> ${value}`);
-    });
+    // Setup camera
+    this.camera = new THREE.PerspectiveCamera(
+      75, 
+      container.clientWidth / container.clientHeight, 
+      0.1, 
+      1000
+    );
+    this.camera.position.set(0, 10, 20);
     
-    $(player).position.listen("y", (value, previousValue) => {
-      console.log(`Player ${sessionId} moved Y: ${previousValue} -> ${value}`);
-    });
+    // Setup renderer
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.shadowMap.enabled = true;
+    container.appendChild(this.renderer.domElement);
     
-    // Track player health
-    $(player).listen("health", (value, previousValue) => {
-      console.log(`Player ${sessionId} health: ${previousValue} -> ${value}`);
-    });
-  });
+    // Setup controls
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
+    
+    // Setup lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    this.scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(50, 50, 50);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
+    this.scene.add(directionalLight);
+    
+    // Setup clock for animations
+    this.clock = new THREE.Clock();
+    
+    // Handle window resize
+    window.addEventListener('resize', this.onWindowResize.bind(this));
+    
+    // Start animation loop
+    this.animate();
+  }
   
-  $(room.state).players.onRemove((player, sessionId) => {
-    console.log("Player removed from state:", sessionId);
-  });
+  private onWindowResize(): void {
+    this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+  }
   
-  $(room.state).projectiles.onAdd((projectile, key) => {
-    console.log("Projectile added:", key);
-  });
+  private animate(): void {
+    requestAnimationFrame(this.animate.bind(this));
+    
+    const delta = this.clock.getDelta();
+    
+    // Update controls
+    this.controls.update();
+    
+    // Render scene
+    this.renderer.render(this.scene, this.camera);
+  }
   
-  $(room.state).projectiles.onRemove((projectile, key) => {
-    console.log("Projectile removed:", key);
-  });
-  
-  // Listen for game state changes
-  $(room.state).listen("gameStarted", (value) => {
-    if (value) console.log("Game has started!");
-  });
-  
-  $(room.state).listen("gameEnded", (value) => {
-    if (value) console.log("Game has ended!");
-  });
-  
-  return { room, $, move, shoot, useAbility, changeCharacter, setReady };
+  // Methods to add/update/remove game objects will be added here
 }
 ```
 
-### Race Room
-
-The Race Room is for racing gameplay.
+### Connecting to the Battle Room
 
 ```typescript
-async function joinRaceRoom(options = {}) {
-  const { room, $ } = await connectToRoom("race", {
-    username: "Racer1",
-    vehicleType: "default",
-    ...options
-  });
+// client/src/services/BattleService.ts
+import { Room } from "colyseus.js";
+import { ColyseusClient } from "./ColyseusClient";
+import { BattleScene } from "../game/BattleScene";
+
+export interface BattleState {
+  players: Map<string, Player>;
+  projectiles: Map<string, Projectile>;
+  mapObjects: any[];
+  mapWidth: number;
+  mapLength: number;
+  mapHeight: number;
+  gravity: number;
+  gameStarted: boolean;
+  gameEnded: boolean;
+  gameTime: number;
+  gameMode: string;
+  timeOfDay: string;
+  weather: string;
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  characterType: string;
+  modelType: string;
+  position: { x: number, y: number, z: number };
+  rotation: { x: number, y: number, z: number, w: number };
+  velocity: { x: number, y: number, z: number };
+  moveDirection: { x: number, y: number, z: number };
+  health: number;
+  maxHealth: number;
+  isGrounded: boolean;
+  animationState: string;
+  abilities: string[];
+}
+
+export interface Projectile {
+  id: string;
+  ownerId: string;
+  type: string;
+  position: { x: number, y: number, z: number };
+  velocity: { x: number, y: number, z: number };
+  rotation: { x: number, y: number, z: number, w: number };
+  damage: number;
+  radius: number;
+  lifetime: number;
+  effectType: string;
+}
+
+export class BattleService {
+  private room: Room<BattleState> | null = null;
+  private playerId: string = "";
+  private battleScene: BattleScene | null = null;
   
-  // Listen for race events
-  room.onMessage("countdown_started", (message) => {
-    console.log("Race countdown started:", message.countdownTime);
-  });
+  constructor(private colyseusClient: ColyseusClient) {}
   
-  room.onMessage("race_started", (message) => {
-    console.log("Race started at:", message.startTime);
-  });
-  
-  room.onMessage("race_ended", (message) => {
-    console.log("Race ended:", message);
-    console.log("Results:", message.playerResults);
-  });
-  
-  room.onMessage("player_joined", (message) => {
-    console.log("Player joined race:", message);
-  });
-  
-  room.onMessage("player_left", (message) => {
-    console.log("Player left race:", message.id);
-  });
-  
-  room.onMessage("player_finished", (message) => {
-    console.log("Player finished race:", message);
-  });
-  
-  room.onMessage("checkpoint_reached", (message) => {
-    console.log("Checkpoint reached:", message);
-  });
-  
-  // Player actions
-  function move(acceleration, steering) {
-    room.send("move", { acceleration, steering });
+  public async joinBattleRoom(
+    gameId: string, 
+    options: { 
+      username: string, 
+      characterType: string,
+      modelType?: string
+    }
+  ): Promise<Room<BattleState>> {
+    try {
+      this.room = await this.colyseusClient.join<BattleState>("battle", {
+        ...options,
+        gameId
+      });
+      
+      this.playerId = this.room.sessionId;
+      this.setupBattleRoomListeners();
+      return this.room;
+    } catch (error) {
+      console.error("Error joining battle room:", error);
+      throw error;
+    }
   }
   
-  function useBoost() {
-    room.send("use_boost");
+  public setBattleScene(scene: BattleScene): void {
+    this.battleScene = scene;
   }
   
-  function setReady(ready = true) {
-    room.send("ready", { ready });
+  private setupBattleRoomListeners(): void {
+    if (!this.room) return;
+    
+    // Listen for state changes
+    this.room.onStateChange((state) => {
+      this.updateGameState(state);
+    });
+    
+    // Listen for specific messages
+    this.room.onMessage("player_joined", (message) => {
+      console.log("Player joined:", message);
+      // Add new player to the scene
+    });
+    
+    this.room.onMessage("player_left", (message) => {
+      console.log("Player left:", message);
+      // Remove player from the scene
+    });
+    
+    this.room.onMessage("game_started", (message) => {
+      console.log("Game started:", message);
+      // Initialize game with received settings
+    });
+    
+    this.room.onMessage("projectile_hit", (message) => {
+      console.log("Projectile hit:", message);
+      // Show hit effect
+    });
+    
+    this.room.onMessage("player_died", (message) => {
+      console.log("Player died:", message);
+      // Show death animation
+    });
+    
+    this.room.onMessage("player_respawned", (message) => {
+      console.log("Player respawned:", message);
+      // Show respawn effect
+    });
+    
+    this.room.onMessage("ability_used", (message) => {
+      console.log("Ability used:", message);
+      // Show ability effect
+    });
+    
+    // Handle errors and disconnections
+    this.room.onError((code, message) => {
+      console.error(`Battle room error (${code}):`, message);
+    });
+    
+    this.room.onLeave((code) => {
+      console.log(`Left battle room (code: ${code})`);
+      this.room = null;
+    });
   }
   
-  // State synchronization
-  $(room.state).players.onAdd((player, sessionId) => {
-    console.log("Player added to race:", sessionId);
+  private updateGameState(state: BattleState): void {
+    // Update game state in the Three.js scene
+    if (!this.battleScene) return;
     
-    // Track player position changes
-    $(player).listen("position", (value, previousValue) => {
-      console.log(`Player ${sessionId} position: ${previousValue} -> ${value}`);
-    });
-    
-    // Track player speed
-    $(player).listen("speed", (value, previousValue) => {
-      console.log(`Player ${sessionId} speed: ${previousValue} -> ${value}`);
-    });
-    
-    // Track boost status
-    $(player).listen("boostActive", (value) => {
-      console.log(`Player ${sessionId} boost active: ${value}`);
-    });
-    
-    // Track checkpoints
-    $(player).checkpoints.onAdd((checkpointId) => {
-      console.log(`Player ${sessionId} reached checkpoint: ${checkpointId}`);
-    });
-  });
+    // Update will be implemented in the BattleScene class
+  }
   
-  $(room.state).players.onRemove((player, sessionId) => {
-    console.log("Player removed from race:", sessionId);
-  });
+  public getBattleRoom(): Room<BattleState> | null {
+    return this.room;
+  }
   
-  // Listen for race state changes
-  $(room.state).listen("countdownActive", (value) => {
-    console.log("Countdown active:", value);
-  });
-  
-  $(room.state).listen("countdownTime", (value) => {
-    console.log("Countdown time:", value);
-  });
-  
-  $(room.state).listen("raceStarted", (value) => {
-    if (value) console.log("Race has started!");
-  });
-  
-  $(room.state).listen("raceEnded", (value) => {
-    if (value) console.log("Race has ended!");
-  });
-  
-  $(room.state).listen("raceTime", (value) => {
-    // Update race timer display
-  });
-  
-  return { room, $, move, useBoost, setReady };
+  public getPlayerId(): string {
+    return this.playerId;
+  }
 }
 ```
 
-### Platformer Room
+### Player Movement
 
-The Platformer Room is for 2D platformer gameplay.
+Extend the BattleScene class to handle player movement:
 
 ```typescript
-async function joinPlatformerRoom(options = {}) {
-  const { room, $ } = await connectToRoom("platformer", {
-    username: "Jumper1",
-    characterType: "knight", // knight, mage, rogue
-    ...options
-  });
+// client/src/game/BattleScene.ts (continued)
+import { BattleService, BattleState, Player, Projectile } from "../services/BattleService";
+
+export class BattleScene {
+  // ... previous code
   
-  // Listen for level data
-  room.onMessage("level_data", (message) => {
-    console.log("Level data received:", message);
-    // Initialize level with platforms, collectibles, and enemies
-  });
+  private battleService: BattleService | null = null;
+  private localPlayerId: string = "";
+  private playerModels: Map<string, THREE.Group> = new Map();
+  private inputDirection = { x: 0, y: 0, z: 0 };
+  private keysPressed: { [key: string]: boolean } = {};
   
-  // Listen for game events
-  room.onMessage("game_started", (message) => {
-    console.log("Platformer game started:", message);
-  });
-  
-  room.onMessage("game_ended", (message) => {
-    console.log("Platformer game ended:", message);
-    console.log("Player results:", message.playerResults);
-  });
-  
-  room.onMessage("player_joined", (message) => {
-    console.log("Player joined platformer:", message);
-  });
-  
-  room.onMessage("player_left", (message) => {
-    console.log("Player left platformer:", message.id);
-  });
-  
-  room.onMessage("player_attack", (message) => {
-    console.log("Player attacked:", message);
-  });
-  
-  room.onMessage("player_damaged", (message) => {
-    console.log("Player damaged:", message);
-  });
-  
-  room.onMessage("player_died", (message) => {
-    console.log("Player died:", message);
-  });
-  
-  room.onMessage("player_respawned", (message) => {
-    console.log("Player respawned:", message);
-  });
-  
-  room.onMessage("collectible_collected", (message) => {
-    console.log("Collectible collected:", message);
-  });
-  
-  room.onMessage("enemy_damaged", (message) => {
-    console.log("Enemy damaged:", message);
-  });
-  
-  room.onMessage("enemy_defeated", (message) => {
-    console.log("Enemy defeated:", message);
-  });
-  
-  room.onMessage("ability_used", (message) => {
-    console.log("Ability used:", message);
-  });
-  
-  // Player actions
-  function move(direction) {
-    room.send("move", { direction }); // -1 (left), 0 (none), 1 (right)
+  public setBattleService(service: BattleService): void {
+    this.battleService = service;
+    this.localPlayerId = service.getPlayerId();
+    
+    // Setup input handlers
+    document.addEventListener('keydown', this.onKeyDown.bind(this));
+    document.addEventListener('keyup', this.onKeyUp.bind(this));
+    
+    // Setup mouse controls for camera and aiming
+    this.container.addEventListener('mousedown', this.onMouseDown.bind(this));
+    this.container.addEventListener('mouseup', this.onMouseUp.bind(this));
+    this.container.addEventListener('mousemove', this.onMouseMove.bind(this));
   }
   
-  function jump() {
-    room.send("jump");
+  private onKeyDown(event: KeyboardEvent): void {
+    this.keysPressed[event.code] = true;
+    
+    // Handle jump
+    if (event.code === 'Space' && this.battleService) {
+      const room = this.battleService.getBattleRoom();
+      if (room) {
+        room.send("jump");
+      }
+    }
+    
+    this.updateMovementDirection();
   }
   
-  function attack() {
-    room.send("attack");
+  private onKeyUp(event: KeyboardEvent): void {
+    this.keysPressed[event.code] = false;
+    this.updateMovementDirection();
   }
   
-  function useAbility(targetPosition = null) {
-    room.send("use_ability", { targetPosition });
+  private updateMovementDirection(): void {
+    // Reset direction
+    this.inputDirection.x = 0;
+    this.inputDirection.z = 0;
+    
+    // Update based on keys pressed
+    if (this.keysPressed['KeyW']) this.inputDirection.z = -1;
+    if (this.keysPressed['KeyS']) this.inputDirection.z = 1;
+    if (this.keysPressed['KeyA']) this.inputDirection.x = -1;
+    if (this.keysPressed['KeyD']) this.inputDirection.x = 1;
+    
+    // Normalize if moving diagonally
+    if (this.inputDirection.x !== 0 && this.inputDirection.z !== 0) {
+      const length = Math.sqrt(this.inputDirection.x * this.inputDirection.x + this.inputDirection.z * this.inputDirection.z);
+      this.inputDirection.x /= length;
+      this.inputDirection.z /= length;
+    }
+    
+    // Send movement to server
+    if (this.battleService) {
+      const room = this.battleService.getBattleRoom();
+      if (room) {
+        room.send("move", {
+          x: this.inputDirection.x,
+          y: this.inputDirection.y,
+          z: this.inputDirection.z,
+          rotation: this.getPlayerRotation()
+        });
+      }
+    }
   }
   
-  function setReady(ready = true) {
-    room.send("ready", { ready });
+  private getPlayerRotation(): { x: number, y: number, z: number, w: number } {
+    // Get rotation from camera or player model
+    // This is a simplified example
+    const rotation = { x: 0, y: 0, z: 0, w: 1 };
+    
+    // In a real implementation, you would convert the camera or model's quaternion
+    if (this.playerModels.has(this.localPlayerId)) {
+      const playerModel = this.playerModels.get(this.localPlayerId);
+      if (playerModel) {
+        rotation.x = playerModel.quaternion.x;
+        rotation.y = playerModel.quaternion.y;
+        rotation.z = playerModel.quaternion.z;
+        rotation.w = playerModel.quaternion.w;
+      }
+    }
+    
+    return rotation;
   }
   
-  // State synchronization
-  $(room.state).players.onAdd((player, sessionId) => {
-    console.log("Player added to platformer:", sessionId);
+  private onMouseDown(event: MouseEvent): void {
+    // Handle shooting
+    if (event.button === 0 && this.battleService) { // Left mouse button
+      const room = this.battleService.getBattleRoom();
+      if (room) {
+        const direction = this.getAimDirection();
+        room.send("shoot", {
+          direction,
+          type: "default" // or "fireball", "arrow", etc.
+        });
+      }
+    }
+  }
+  
+  private onMouseUp(event: MouseEvent): void {
+    // Handle releasing mouse button if needed
+  }
+  
+  private onMouseMove(event: MouseEvent): void {
+    // Update aim direction if needed
+  }
+  
+  private getAimDirection(): { x: number, y: number, z: number } {
+    // Calculate aim direction based on camera
+    // This is a simplified example
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyQuaternion(this.camera.quaternion);
     
-    // Track player position changes
-    $(player).position.listen("x", (value, previousValue) => {
-      console.log(`Player ${sessionId} moved X: ${previousValue} -> ${value}`);
+    return {
+      x: direction.x,
+      y: direction.y,
+      z: direction.z
+    };
+  }
+  
+  // Update game state from server
+  public updateFromState(state: BattleState): void {
+    // Update players
+    state.players.forEach((player, id) => {
+      this.updateOrCreatePlayer(id, player);
     });
     
-    $(player).position.listen("y", (value, previousValue) => {
-      console.log(`Player ${sessionId} moved Y: ${previousValue} -> ${value}`);
-    });
-    
-    // Track player velocity
-    $(player).velocity.listen("x", (value) => {
-      // Update player horizontal movement animation
-    });
-    
-    $(player).velocity.listen("y", (value) => {
-      // Update player vertical movement animation
-    });
-    
-    // Track player state
-    $(player).listen("health", (value) => {
-      console.log(`Player ${sessionId} health: ${value}`);
-    });
-    
-    $(player).listen("score", (value) => {
-      console.log(`Player ${sessionId} score: ${value}`);
-    });
-    
-    $(player).listen("attacking", (value) => {
-      if (value) {
-        // Play attack animation
+    // Remove players that are no longer in the state
+    this.playerModels.forEach((model, id) => {
+      if (!state.players.has(id)) {
+        this.removePlayer(id);
       }
     });
     
-    $(player).listen("usingAbility", (value) => {
-      if (value) {
-        // Play ability animation
+    // Update projectiles
+    state.projectiles.forEach((projectile, id) => {
+      this.updateOrCreateProjectile(id, projectile);
+    });
+    
+    // Remove projectiles that are no longer in the state
+    this.projectiles.forEach((projectile, id) => {
+      if (!state.projectiles.has(id)) {
+        this.removeProjectile(id);
       }
     });
     
-    $(player).listen("canJump", (value) => {
-      // Update jump availability UI
-    });
-  });
-  
-  $(room.state).players.onRemove((player, sessionId) => {
-    console.log("Player removed from platformer:", sessionId);
-  });
-  
-  // Track platforms, collectibles, and enemies
-  $(room.state).platforms.onAdd((platform, index) => {
-    console.log("Platform added:", platform);
-    // Create platform in game world
-  });
-  
-  $(room.state).collectibles.onAdd((collectible, index) => {
-    console.log("Collectible added:", collectible);
-    // Create collectible in game world
-  });
-  
-  $(room.state).collectibles.onRemove((collectible, index) => {
-    console.log("Collectible removed:", index);
-    // Remove collectible from game world
-  });
-  
-  $(room.state).enemies.onAdd((enemy, index) => {
-    console.log("Enemy added:", enemy);
-    // Create enemy in game world
-    
-    $(enemy).position.listen("x", (value) => {
-      // Update enemy position
-    });
-    
-    $(enemy).position.listen("y", (value) => {
-      // Update enemy position
-    });
-    
-    $(enemy).listen("health", (value) => {
-      // Update enemy health display
-    });
-    
-    $(enemy).listen("stunned", (value) => {
-      if (value) {
-        // Show stunned animation
-      }
-    });
-  });
-  
-  $(room.state).enemies.onRemove((enemy, index) => {
-    console.log("Enemy removed:", index);
-    // Remove enemy from game world
-  });
-  
-  return { room, $, move, jump, attack, useAbility, setReady };
-}
-```
-
-## Schema Synchronization
-
-Colyseus v0.16 introduces a new way to handle schema callbacks using the `$()` proxy. Here's how to work with it:
-
-```typescript
-import { getStateCallbacks } from "colyseus.js";
-
-function setupSchemaCallbacks(room) {
-  const $ = getStateCallbacks(room);
-  
-  // Listen for top-level state changes
-  $(room.state).listen("gameStarted", (value) => {
-    console.log("Game started:", value);
-  });
-  
-  // Listen for map additions
-  $(room.state).players.onAdd((player, sessionId) => {
-    console.log("Player added:", sessionId);
-    
-    // Listen for nested property changes
-    $(player).position.listen("x", (value, previousValue) => {
-      console.log(`Position X changed: ${previousValue} -> ${value}`);
-    });
-    
-    $(player).position.listen("y", (value, previousValue) => {
-      console.log(`Position Y changed: ${previousValue} -> ${value}`);
-    });
-    
-    // Listen for direct property changes
-    $(player).listen("health", (value, previousValue) => {
-      console.log(`Health changed: ${previousValue} -> ${value}`);
-    });
-  });
-  
-  // Listen for map removals
-  $(room.state).players.onRemove((player, sessionId) => {
-    console.log("Player removed:", sessionId);
-  });
-  
-  // Listen for array additions
-  $(room.state).platforms.onAdd((platform, index) => {
-    console.log("Platform added at index:", index);
-  });
-  
-  // Listen for array removals
-  $(room.state).platforms.onRemove((platform, index) => {
-    console.log("Platform removed at index:", index);
-  });
-  
-  // Listen for array changes
-  $(room.state).platforms.onChange((platform, index) => {
-    console.log("Platform changed at index:", index);
-  });
-  
-  return $;
-}
-```
-
-## Handling Game Events
-
-```typescript
-function setupGameEventHandlers(room) {
-  // Generic message handler
-  room.onMessage("*", (type, message) => {
-    console.log(`Received message of type: ${type}`, message);
-  });
-  
-  // Specific message handlers
-  room.onMessage("game_started", (message) => {
-    // Handle game start
-  });
-  
-  room.onMessage("game_ended", (message) => {
-    // Handle game end
-  });
-  
-  // Error handling
-  room.onError((code, message) => {
-    console.error(`Room error (${code}):`, message);
-  });
-  
-  // Disconnection handling
-  room.onLeave((code) => {
-    console.log(`Left room with code: ${code}`);
-  });
-}
-```
-
-## Working with Abilities
-
-The server includes an AbilityManager that handles different character abilities. Here's how to work with it on the client side:
-
-```typescript
-// Character ability mappings
-const characterAbilities = {
-  warrior: ["charge", "shockwave", "berserk"],
-  mage: ["fireball", "teleport", "frostNova"],
-  archer: ["multishot", "trap", "rapidFire"],
-  rogue: ["stealth", "smokeBomb", "backstab"],
-  healer: ["heal", "shield", "revive"]
-};
-
-// Ability cooldown tracking
-class ClientAbilityManager {
-  constructor(room, $) {
-    this.room = room;
-    this.$ = $;
-    this.cooldowns = {};
-    this.abilityIcons = {}; // Map ability IDs to UI elements
+    // Update camera to follow local player
+    this.updateCameraPosition();
   }
   
-  setupAbilityTracking(playerId) {
-    const player = this.room.state.players.get(playerId);
+  private updateOrCreatePlayer(id: string, player: Player): void {
+    if (this.playerModels.has(id)) {
+      // Update existing player
+      const model = this.playerModels.get(id)!;
+      model.position.set(player.position.x, player.position.y, player.position.z);
+      model.quaternion.set(player.rotation.x, player.rotation.y, player.rotation.z, player.rotation.w);
+      
+      // Update animation state if needed
+      this.updatePlayerAnimation(model, player.animationState);
+    } else {
+      // Create new player model
+      this.createPlayerModel(id, player);
+    }
+  }
+  
+  private createPlayerModel(id: string, player: Player): void {
+    // Create a simple player model (in a real game, you'd load a 3D model)
+    const group = new THREE.Group();
+    
+    // Body
+    const geometry = new THREE.BoxGeometry(1, 2, 1);
+    const material = new THREE.MeshLambertMaterial({ 
+      color: id === this.localPlayerId ? 0x00ff00 : 0xff0000 
+    });
+    const body = new THREE.Mesh(geometry, material);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+    
+    // Head
+    const headGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const headMaterial = new THREE.MeshLambertMaterial({ color: 0xffa500 });
+    const head = new THREE.Mesh(headGeometry, headMaterial);
+    head.position.y = 1.25;
+    head.castShadow = true;
+    group.add(head);
+    
+    // Position the model
+    group.position.set(player.position.x, player.position.y, player.position.z);
+    group.quaternion.set(player.rotation.x, player.rotation.y, player.rotation.z, player.rotation.w);
+    
+    // Add to scene and store reference
+    this.scene.add(group);
+    this.playerModels.set(id, group);
+    
+    // Add player name label
+    this.addPlayerNameLabel(id, player.name, group);
+    
+    // Add health bar
+    this.addHealthBar(id, player.health / player.maxHealth, group);
+  }
+  
+  private addPlayerNameLabel(id: string, name: string, group: THREE.Group): void {
+    // Create a canvas for the name label
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    
+    canvas.width = 256;
+    canvas.height = 64;
+    
+    context.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    context.font = '24px Arial';
+    context.fillStyle = 'white';
+    context.textAlign = 'center';
+    context.fillText(name, canvas.width / 2, canvas.height / 2 + 8);
+    
+    // Create a sprite with the canvas texture
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.y = 2.5;
+    sprite.scale.set(2, 0.5, 1);
+    
+    group.add(sprite);
+  }
+  
+  private addHealthBar(id: string, healthPercent: number, group: THREE.Group): void {
+    // Create a canvas for the health bar
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    
+    canvas.width = 100;
+    canvas.height = 10;
+    
+    // Background
+    context.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Health fill
+    context.fillStyle = healthPercent > 0.5 ? 'green' : healthPercent > 0.25 ? 'yellow' : 'red';
+    context.fillRect(0, 0, canvas.width * healthPercent, canvas.height);
+    
+    // Create a sprite with the canvas texture
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.y = 2.2;
+    sprite.scale.set(1, 0.1, 1);
+    
+    group.add(sprite);
+  }
+  
+  private updatePlayerAnimation(model: THREE.Group, animationState: string): void {
+    // In a real game, you would update the animation based on the state
+    // This is a simplified example
+    console.log(`Player animation state: ${animationState}`);
+  }
+  
+  private removePlayer(id: string): void {
+    if (this.playerModels.has(id)) {
+      const model = this.playerModels.get(id)!;
+      this.scene.remove(model);
+      this.playerModels.delete(id);
+    }
+  }
+  
+  private updateOrCreateProjectile(id: string, projectile: Projectile): void {
+    if (this.projectiles.has(id)) {
+      // Update existing projectile
+      const model = this.projectiles.get(id)!;
+      model.position.set(projectile.position.x, projectile.position.y, projectile.position.z);
+      model.quaternion.set(projectile.rotation.x, projectile.rotation.y, projectile.rotation.z, projectile.rotation.w);
+    } else {
+      // Create new projectile
+      this.createProjectileModel(id, projectile);
+    }
+  }
+  
+  private createProjectileModel(id: string, projectile: Projectile): void {
+    // Create a projectile model based on type
+    let geometry, material;
+    
+    switch (projectile.type) {
+      case "fireball":
+        geometry = new THREE.SphereGeometry(projectile.radius, 16, 16);
+        material = new THREE.MeshBasicMaterial({ color: 0xff4500 });
+        break;
+      case "arrow":
+        geometry = new THREE.CylinderGeometry(0.05, 0.05, 1, 8);
+        material = new THREE.MeshBasicMaterial({ color: 0x8b4513 });
+        break;
+      case "laser":
+        geometry = new THREE.CylinderGeometry(0.05, 0.05, 1, 8);
+        material = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+        break;
+      default:
+        geometry = new THREE.SphereGeometry(projectile.radius, 8, 8);
+        material = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+    }
+    
+    const mesh = new THREE.Mesh(geometry, material);
+    
+    // Add light for some projectiles
+    if (projectile.type === "fireball" || projectile.type === "laser") {
+      const light = new THREE.PointLight(
+        projectile.type === "fireball" ? 0xff4500 : 0x00ffff,
+        1,
+        10
+      );
+      mesh.add(light);
+    }
+    
+    // Position and rotate
+    mesh.position.set(projectile.position.x, projectile.position.y, projectile.position.z);
+    mesh.quaternion.set(projectile.rotation.x, projectile.rotation.y, projectile.rotation.z, projectile.rotation.w);
+    
+    // Add to scene and store reference
+    this.scene.add(mesh);
+    this.projectiles.set(id, mesh);
+  }
+  
+  private removeProjectile(id: string): void {
+    if (this.projectiles.has(id)) {
+      const model = this.projectiles.get(id)!;
+      this.scene.remove(model);
+      this.projectiles.delete(id);
+    }
+  }
+  
+  private updateCameraPosition(): void {
+    // Follow the local player with the camera
+    if (this.playerModels.has(this.localPlayerId)) {
+      const playerModel = this.playerModels.get(this.localPlayerId)!;
+      
+      // Third-person camera
+      const idealOffset = new THREE.Vector3(0, 5, 10);
+      idealOffset.applyQuaternion(playerModel.quaternion);
+      idealOffset.add(playerModel.position);
+      
+      const idealLookAt = new THREE.Vector3(0, 0, -1);
+      idealLookAt.applyQuaternion(playerModel.quaternion);
+      idealLookAt.add(playerModel.position);
+      
+      // Smoothly move camera to ideal position
+      this.camera.position.lerp(idealOffset, 0.1);
+      this.controls.target.lerp(playerModel.position, 0.1);
+    }
+  }
+  
+  // Update method to be called in animation loop
+  public update(delta: number): void {
+    // Update any animations or effects
+  }
+}
+```
+
+### Abilities System
+
+```typescript
+// client/src/services/BattleService.ts (continued)
+export class BattleService {
+  // ... previous code
+  
+  public useAbility(abilityId: string, targetPosition?: { x: number, y: number, z: number }): void {
+    if (!this.room) {
+      throw new Error("Not connected to battle room");
+    }
+    
+    this.room.send("use_ability", {
+      abilityId,
+      targetPosition
+    });
+  }
+  
+  public setReady(ready: boolean): void {
+    if (!this.room) {
+      throw new Error("Not connected to battle room");
+    }
+    
+    this.room.send("ready", { ready });
+  }
+  
+  public changeCharacter(characterType: string, modelType?: string): void {
+    if (!this.room) {
+      throw new Error("Not connected to battle room");
+    }
+    
+    this.room.send("change_character", {
+      characterType,
+      modelType: modelType || characterType
+    });
+  }
+}
+
+// Usage example
+const battleService = new BattleService(colyseusClient);
+await battleService.joinBattleRoom("game_id_123", {
+  username: "Player1",
+  characterType: "warrior"
+});
+
+// Use an ability
+battleService.useAbility("charge", { x: 10, y: 0, z: 20 });
+
+// Set ready state
+battleService.setReady(true);
+```
+
+Add UI controls for abilities:
+
+```typescript
+// client/src/game/BattleUI.ts
+export class BattleUI {
+  private abilityButtons: Map<string, HTMLButtonElement> = new Map();
+  private healthBar: HTMLElement;
+  private gameStatusElement: HTMLElement;
+  
+  constructor(
+    private container: HTMLElement,
+    private battleService: BattleService
+  ) {
+    // Create UI container
+    const uiContainer = document.createElement('div');
+    uiContainer.className = 'battle-ui';
+    uiContainer.style.position = 'absolute';
+    uiContainer.style.bottom = '20px';
+    uiContainer.style.left = '50%';
+    uiContainer.style.transform = 'translateX(-50%)';
+    uiContainer.style.display = 'flex';
+    uiContainer.style.gap = '10px';
+    
+    // Create health bar
+    this.healthBar = document.createElement('div');
+    this.healthBar.className = 'health-bar';
+    this.healthBar.style.position = 'absolute';
+    this.healthBar.style.top = '20px';
+    this.healthBar.style.left = '20px';
+    this.healthBar.style.width = '200px';
+    this.healthBar.style.height = '20px';
+    this.healthBar.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    
+    const healthFill = document.createElement('div');
+    healthFill.className = 'health-fill';
+    healthFill.style.width = '100%';
+    healthFill.style.height = '100%';
+    healthFill.style.backgroundColor = 'green';
+    
+    this.healthBar.appendChild(healthFill);
+    
+    // Create game status element
+    this.gameStatusElement = document.createElement('div');
+    this.gameStatusElement.className = 'game-status';
+    this.gameStatusElement.style.position = 'absolute';
+    this.gameStatusElement.style.top = '20px';
+    this.gameStatusElement.style.left = '50%';
+    this.gameStatusElement.style.transform = 'translateX(-50%)';
+    this.gameStatusElement.style.color = 'white';
+    this.gameStatusElement.style.fontSize = '24px';
+    this.gameStatusElement.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)';
+    
+    // Add elements to container
+    container.appendChild(uiContainer);
+    container.appendChild(this.healthBar);
+    container.appendChild(this.gameStatusElement);
+    
+    // Setup ability buttons
+    this.setupAbilityButtons(uiContainer);
+    
+    // Listen for state changes
+    const room = battleService.getBattleRoom();
+    if (room) {
+      room.onStateChange((state) => {
+        this.updateUI(state);
+      });
+    }
+  }
+  
+  private setupAbilityButtons(container: HTMLElement): void {
+    const room = this.battleService.getBattleRoom();
+    if (!room || !room.state.players) return;
+    
+    const player = room.state.players.get(this.battleService.getPlayerId());
     if (!player) return;
     
-    // Track ability cooldowns
-    $(player).abilityCooldowns.onAdd((cooldown, abilityId) => {
-      this.cooldowns[abilityId] = cooldown;
-      this.updateAbilityUI(abilityId, cooldown);
-    });
-    
-    $(player).abilityCooldowns.onChange((cooldown, abilityId) => {
-      this.cooldowns[abilityId] = cooldown;
-      this.updateAbilityUI(abilityId, cooldown);
-    });
-    
-    $(player).abilityCooldowns.onRemove((cooldown, abilityId) => {
-      delete this.cooldowns[abilityId];
-      this.updateAbilityUI(abilityId, 0);
+    // Create buttons for each ability
+    player.abilities.forEach((abilityId) => {
+      const button = document.createElement('button');
+      button.className = 'ability-button';
+      button.textContent = this.getAbilityName(abilityId);
+      button.style.padding = '10px';
+      button.style.backgroundColor = '#4CAF50';
+      button.style.border = 'none';
+      button.style.borderRadius = '5px';
+      button.style.color = 'white';
+      button.style.fontSize = '16px';
+      button.style.cursor = 'pointer';
+      
+      button.addEventListener('click', () => {
+        this.useAbility(abilityId);
+      });
+      
+      container.appendChild(button);
+      this.abilityButtons.set(abilityId, button);
     });
   }
   
-  useAbility(abilityId, targetPosition = null) {
-    // Check local cooldown first to avoid unnecessary server requests
-    if (this.cooldowns[abilityId] > 0) {
-      console.log(`Ability ${abilityId} is on cooldown: ${this.cooldowns[abilityId]}ms remaining`);
-      return false;
+  private getAbilityName(abilityId: string): string {
+    // Convert ability ID to a readable name
+    return abilityId
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+  
+  private useAbility(abilityId: string): void {
+    // Get target position if needed
+    let targetPosition;
+    
+    // For abilities that need a target position, get it from the camera
+    if (['fireball', 'teleport', 'multishot'].includes(abilityId)) {
+      // This is a simplified example
+      // In a real game, you might use raycasting to get a target position
+      const direction = new THREE.Vector3(0, 0, -1);
+      direction.applyQuaternion(this.battleService.getCamera().quaternion);
+      direction.multiplyScalar(20); // 20 units in front of the camera
+      
+      targetPosition = {
+        x: this.battleService.getCamera().position.x + direction.x,
+        y: this.battleService.getCamera().position.y + direction.y,
+        z: this.battleService.getCamera().position.z + direction.z
+      };
     }
     
-    // Send ability use request to server
-    this.room.send("use_ability", { abilityId, targetPosition });
-    return true;
+    // Use the ability
+    this.battleService.useAbility(abilityId, targetPosition);
   }
   
-  updateAbilityUI(abilityId, cooldown) {
-    // Update UI to show cooldown
-    const icon = this.abilityIcons[abilityId];
-    if (icon) {
-      if (cooldown > 0) {
-        // Show cooldown overlay
-        icon.showCooldown(cooldown);
-      } else {
-        // Show ability as available
-        icon.hideCooldown();
+  private updateUI(state: BattleState): void {
+    const player = state.players.get(this.battleService.getPlayerId());
+    if (!player) return;
+    
+    // Update health bar
+    const healthFill = this.healthBar.querySelector('.health-fill') as HTMLElement;
+    if (healthFill) {
+      const healthPercent = player.health / player.maxHealth;
+      healthFill.style.width = `${healthPercent * 100}%`;
+      healthFill.style.backgroundColor = healthPercent > 0.5 ? 'green' : healthPercent > 0.25 ? 'yellow' : 'red';
+    }
+    
+    // Update ability cooldowns
+    player.abilityCooldowns.forEach((cooldown, abilityId) => {
+      const button = this.abilityButtons.get(abilityId);
+      if (button) {
+        if (cooldown > 0) {
+          button.disabled = true;
+          button.textContent = `${this.getAbilityName(abilityId)} (${Math.ceil(cooldown / 1000)}s)`;
+        } else {
+          button.disabled = false;
+          button.textContent = this.getAbilityName(abilityId);
+        }
+      }
+    });
+    
+    // Update game status
+    if (state.gameStarted && !state.gameEnded) {
+      const minutes = Math.floor(state.gameTime / 60);
+      const seconds = Math.floor(state.gameTime % 60);
+      this.gameStatusElement.textContent = `Game Time: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+    } else if (!state.gameStarted) {
+      this.gameStatusElement.textContent = 'Waiting for players...';
+    } else if (state.gameEnded) {
+      this.gameStatusElement.textContent = 'Game Over';
+    }
+  }
+}
+```
+
+## State Synchronization
+
+For efficient state synchronization, implement a state manager:
+
+```typescript
+// client/src/game/StateManager.ts
+import { Room } from "colyseus.js";
+import { BattleState } from "../services/BattleService";
+import { BattleScene } from "./BattleScene";
+
+export class StateManager {
+  private previousState: BattleState | null = null;
+  
+  constructor(
+    private room: Room<BattleState>,
+    private battleScene: BattleScene
+  ) {
+    // Set up state change listener
+    room.onStateChange((state) => {
+      this.handleStateChange(state);
+    });
+  }
+  
+  private handleStateChange(state: BattleState): void {
+    // Update the scene with the new state
+    this.battleScene.updateFromState(state);
+    
+    // Store the state for interpolation
+    this.previousState = state;
+  }
+  
+  // Interpolation for smoother movement between updates
+  public interpolate(alpha: number): void {
+    if (!this.previousState || !this.room.state) return;
+    
+    // Interpolate player positions
+    this.room.state.players.forEach((player, id) => {
+      if (this.previousState.players.has(id)) {
+        const prevPlayer = this.previousState.players.get(id)!;
+        
+        // Skip local player to avoid overriding input
+        if (id === this.room.sessionId) return;
+        
+        // Interpolate position
+        const interpolatedPosition = {
+          x: prevPlayer.position.x + (player.position.x - prevPlayer.position.x) * alpha,
+          y: prevPlayer.position.y + (player.position.y - prevPlayer.position.y) * alpha,
+          z: prevPlayer.position.z + (player.position.z - prevPlayer.position.z) * alpha
+        };
+        
+        // Update player model position
+        this.battleScene.updatePlayerPosition(id, interpolatedPosition);
+      }
+    });
+    
+    // Interpolate projectile positions
+    this.room.state.projectiles.forEach((projectile, id) => {
+      if (this.previousState.projectiles.has(id)) {
+        const prevProjectile = this.previousState.projectiles.get(id)!;
+        
+        // Interpolate position
+        const interpolatedPosition = {
+          x: prevProjectile.position.x + (projectile.position.x - prevProjectile.position.x) * alpha,
+          y: prevProjectile.position.y + (projectile.position.y - prevProjectile.position.y) * alpha,
+          z: prevProjectile.position.z + (projectile.position.z - prevProjectile.position.z) * alpha
+        };
+        
+        // Update projectile model position
+        this.battleScene.updateProjectilePosition(id, interpolatedPosition);
+      }
+    });
+  }
+}
+```
+
+Add the necessary methods to BattleScene:
+
+```typescript
+// client/src/game/BattleScene.ts (continued)
+export class BattleScene {
+  // ... previous code
+  
+  public updatePlayerPosition(id: string, position: { x: number, y: number, z: number }): void {
+    if (this.playerModels.has(id)) {
+      const model = this.playerModels.get(id)!;
+      model.position.set(position.x, position.y, position.z);
+    }
+  }
+  
+  public updateProjectilePosition(id: string, position: { x: number, y: number, z: number }): void {
+    if (this.projectiles.has(id)) {
+      const model = this.projectiles.get(id)!;
+      model.position.set(position.x, position.y, position.z);
+    }
+  }
+}
+```
+
+## Event Handling
+
+Create an event system for game events:
+
+```typescript
+// client/src/game/EventManager.ts
+import { Room } from "colyseus.js";
+import { BattleState } from "../services/BattleService";
+import { BattleScene } from "./BattleScene";
+
+export class EventManager {
+  constructor(
+    private room: Room<BattleState>,
+    private battleScene: BattleScene
+  ) {
+    this.setupEventListeners();
+  }
+  
+  private setupEventListeners(): void {
+    // Player events
+    this.room.onMessage("player_joined", (message) => {
+      console.log("Player joined:", message);
+      // Play join sound or show effect
+      this.playSound("join");
+    });
+    
+    this.room.onMessage("player_left", (message) => {
+      console.log("Player left:", message);
+      // Play leave sound or show effect
+      this.playSound("leave");
+    });
+    
+    this.room.onMessage("player_died", (message) => {
+      console.log("Player died:", message);
+      // Show death effect
+      this.battleScene.showDeathEffect(message.position);
+      this.playSound("death");
+    });
+    
+    this.room.onMessage("player_respawned", (message) => {
+      console.log("Player respawned:", message);
+      // Show respawn effect
+      this.battleScene.showRespawnEffect(message.position);
+      this.playSound("respawn");
+    });
+    
+    // Combat events
+    this.room.onMessage("projectile_hit", (message) => {
+      console.log("Projectile hit:", message);
+      // Show hit effect
+      this.battleScene.showHitEffect(message.position);
+      this.playSound("hit");
+    });
+    
+    this.room.onMessage("projectile_impact", (message) => {
+      console.log("Projectile impact:", message);
+      // Show impact effect
+      this.battleScene.showImpactEffect(message.position, message.normal);
+      this.playSound("impact");
+    });
+    
+    this.room.onMessage("ability_used", (message) => {
+      console.log("Ability used:", message);
+      // Show ability effect
+      this.battleScene.showAbilityEffect(message.playerId, message.abilityId, message.targetPosition);
+      this.playSound(message.abilityId);
+    });
+    
+    // Game state events
+    this.room.onMessage("game_started", (message) => {
+      console.log("Game started:", message);
+      // Show game start UI
+      this.battleScene.showGameStartUI();
+      this.playSound("gameStart");
+    });
+    
+    this.room.onMessage("game_ended", (message) => {
+      console.log("Game ended:", message);
+      // Show game end UI with results
+      this.battleScene.showGameEndUI(message);
+      this.playSound("gameEnd");
+    });
+  }
+  
+  private playSound(soundId: string): void {
+    // Play sound effect
+    // This is a simplified example
+    console.log(`Playing sound: ${soundId}`);
+    
+    // In a real implementation, you would use the Web Audio API or a library like Howler.js
+    // Example:
+    // const sound = new Audio(`/sounds/${soundId}.mp3`);
+    // sound.play();
+  }
+}
+```
+
+Add the necessary methods to BattleScene:
+
+```typescript
+// client/src/game/BattleScene.ts (continued)
+export class BattleScene {
+  // ... previous code
+  
+  public showDeathEffect(position: { x: number, y: number, z: number }): void {
+    // Create a particle effect for player death
+    const particles = new THREE.Points(
+      new THREE.BufferGeometry(),
+      new THREE.PointsMaterial({
+        color: 0xff0000,
+        size: 0.5,
+        blending: THREE.AdditiveBlending,
+        transparent: true
+      })
+    );
+    
+    // Create particles
+    const particleCount = 50;
+    const positions = new Float32Array(particleCount * 3);
+    
+    for (let i = 0; i &lt; particleCount; i++) {
+      const i3 = i * 3;
+      positions[i3] = position.x;
+      positions[i3 + 1] = position.y;
+      positions[i3 + 2] = position.z;
+    }
+    
+    particles.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    
+    // Add to scene
+    this.scene.add(particles);
+    
+    // Animate particles
+    const velocities = [];
+    for (let i = 0; i &lt; particleCount; i++) {
+      velocities.push({
+        x: (Math.random() - 0.5) * 2,
+        y: Math.random() * 2,
+        z: (Math.random() - 0.5) * 2
+      });
+    }
+    
+    // Animation loop
+    const animate = () => {
+      const positions = particles.geometry.attributes.position.array as Float32Array;
+      
+      for (let i = 0; i &lt; particleCount; i++) {
+        const i3 = i * 3;
+        positions[i3] += velocities[i].x * 0.1;
+        positions[i3 + 1] += velocities[i].y * 0.1;
+        positions[i3 + 2] += velocities[i].z * 0.1;
+      }
+      
+      particles.geometry.attributes.position.needsUpdate = true;
+    };
+    
+    // Add to animation loop
+    const animationId = this.addToAnimationLoop(animate);
+    
+    // Remove after 2 seconds
+    setTimeout(() => {
+      this.removeFromAnimationLoop(animationId);
+      this.scene.remove(particles);
+    }, 2000);
+  }
+  
+  public showRespawnEffect(position: { x: number, y: number, z: number }): void {
+    // Create a light effect for respawn
+    const light = new THREE.PointLight(0x00ffff, 5, 10);
+    light.position.set(position.x, position.y, position.z);
+    this.scene.add(light);
+    
+    // Animate light
+    let intensity = 5;
+    const animate = () => {
+      intensity -= 0.1;
+      light.intensity = Math.max(0, intensity);
+    };
+    
+    // Add to animation loop
+    const animationId = this.addToAnimationLoop(animate);
+    
+    // Remove after 2 seconds
+    setTimeout(() => {
+      this.removeFromAnimationLoop(animationId);
+      this.scene.remove(light);
+    }, 2000);
+  }
+  
+  public showHitEffect(position: { x: number, y: number, z: number }): void {
+    // Create a hit effect
+    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xff0000,
+      transparent: true,
+      opacity: 0.8
+    });
+    const sphere = new THREE.Mesh(geometry, material);
+    sphere.position.set(position.x, position.y, position.z);
+    this.scene.add(sphere);
+    
+    // Animate sphere
+    let scale = 1;
+    const animate = () => {
+      scale += 0.1;
+      sphere.scale.set(scale, scale, scale);
+      sphere.material.opacity -= 0.05;
+    };
+    
+    // Add to animation loop
+    const animationId = this.addToAnimationLoop(animate);
+    
+    // Remove after 1 second
+    setTimeout(() => {
+      this.removeFromAnimationLoop(animationId);
+      this.scene.remove(sphere);
+    }, 1000);
+  }
+  
+  public showImpactEffect(
+    position: { x: number, y: number, z: number },
+    normal: { x: number, y: number, z: number }
+  ): void {
+    // Create an impact effect
+    const geometry = new THREE.PlaneGeometry(2, 2);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffff00,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide
+    });
+    const plane = new THREE.Mesh(geometry, material);
+    
+    // Position and orient the plane
+    plane.position.set(position.x, position.y, position.z);
+    
+    // Orient plane to face normal direction
+    const normalVector = new THREE.Vector3(normal.x, normal.y, normal.z);
+    plane.lookAt(
+      plane.position.x + normalVector.x,
+      plane.position.y + normalVector.y,
+      plane.position.z + normalVector.z
+    );
+    
+    // Move slightly away from the surface
+    plane.position.x += normalVector.x * 0.01;
+    plane.position.y += normalVector.y * 0.01;
+    plane.position.z += normalVector.z * 0.01;
+    
+    this.scene.add(plane);
+    
+    // Animate plane
+    let scale = 1;
+    const animate = () => {
+      scale += 0.1;
+      plane.scale.set(scale, scale, 1);
+      plane.material.opacity -= 0.05;
+    };
+    
+    // Add to animation loop
+    const animationId = this.addToAnimationLoop(animate);
+    
+    // Remove after 1 second
+    setTimeout(() => {
+      this.removeFromAnimationLoop(animationId);
+      this.scene.remove(plane);
+    }, 1000);
+  }
+  
+  public showAbilityEffect(
+    playerId: string,
+    abilityId: string,
+    targetPosition: { x: number, y: number, z: number } | null
+  ): void {
+    // Get player position
+    if (!this.playerModels.has(playerId)) return;
+    const playerModel = this.playerModels.get(playerId)!;
+    
+    // Create ability effect based on ability type
+    switch (abilityId) {
+      case "charge":
+        this.showChargeEffect(playerModel);
+        break;
+      case "shockwave":
+        this.showShockwaveEffect(playerModel.position);
+        break;
+      case "fireball":
+        if (targetPosition) {
+          this.showFireballEffect(playerModel.position, targetPosition);
+        }
+        break;
+      // Add more ability effects as needed
+    }
+  }
+  
+  private showChargeEffect(playerModel: THREE.Group): void {
+    // Create a trail effect behind the player
+    const geometry = new THREE.BufferGeometry();
+    const material = new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.5
+    });
+    
+    // Create line points
+    const points = [];
+    for (let i = 0; i &lt; 10; i++) {
+      points.push(
+        playerModel.position.x - i * 0.2,
+        playerModel.position.y,
+        playerModel.position.z
+      );
+    }
+    
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    const line = new THREE.Line(geometry, material);
+    this.scene.add(line);
+    
+    // Animate line
+    let opacity = 0.5;
+    const animate = () => {
+      opacity -= 0.02;
+      line.material.opacity = Math.max(0, opacity);
+    };
+    
+    // Add to animation loop
+    const animationId = this.addToAnimationLoop(animate);
+    
+    // Remove after 1 second
+    setTimeout(() => {
+      this.removeFromAnimationLoop(animationId);
+      this.scene.remove(line);
+    }, 1000);
+  }
+  
+  private showShockwaveEffect(position: THREE.Vector3): void {
+    // Create a ring effect
+    const geometry = new THREE.RingGeometry(1, 1.5, 32);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x00ffff,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide
+    });
+    const ring = new THREE.Mesh(geometry, material);
+    
+    // Position the ring
+    ring.position.set(position.x, position.y + 0.1, position.z);
+    ring.rotation.x = Math.PI / 2; // Lay flat
+    
+    this.scene.add(ring);
+    
+    // Animate ring
+    let radius = 1;
+    const animate = () => {
+      radius += 0.2;
+      ring.geometry.dispose();
+      ring.geometry = new THREE.RingGeometry(radius, radius + 0.5, 32);
+      ring.material.opacity -= 0.02;
+    };
+    
+    // Add to animation loop
+    const animationId = this.addToAnimationLoop(animate);
+    
+    // Remove after 2 seconds
+    setTimeout(() => {
+      this.removeFromAnimationLoop(animationId);
+      this.scene.remove(ring);
+    }, 2000);
+  }
+  
+  private showFireballEffect(
+    startPosition: THREE.Vector3,
+    targetPosition: { x: number, y: number, z: number }
+  ): void {
+    // Create a fireball effect
+    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xff4500,
+      transparent: true,
+      opacity: 0.8
+    });
+    const fireball = new THREE.Mesh(geometry, material);
+    
+    // Position the fireball
+    fireball.position.copy(startPosition);
+    
+    // Add a light
+    const light = new THREE.PointLight(0xff4500, 2, 10);
+    fireball.add(light);
+    
+    this.scene.add(fireball);
+    
+    // Calculate direction
+    const direction = new THREE.Vector3(
+      targetPosition.x - startPosition.x,
+      targetPosition.y - startPosition.y,
+      targetPosition.z - startPosition.z
+    ).normalize();
+    
+    // Animate fireball
+    const speed = 0.5;
+    const animate = () => {
+      fireball.position.x += direction.x * speed;
+      fireball.position.y += direction.y * speed;
+      fireball.position.z += direction.z * speed;
+      
+      // Check if reached target
+      const distance = new THREE.Vector3(
+        targetPosition.x - fireball.position.x,
+        targetPosition.y - fireball.position.y,
+        targetPosition.z - fireball.position.z
+      ).length();
+      
+      if (distance &lt; 1) {
+        // Show explosion effect
+        this.showExplosionEffect({
+          x: fireball.position.x,
+          y: fireball.position.y,
+          z: fireball.position.z
+        });
+        
+        // Remove fireball
+        this.scene.remove(fireball);
+        this.removeFromAnimationLoop(animationId);
+      }
+    };
+    
+    // Add to animation loop
+    const animationId = this.addToAnimationLoop(animate);
+    
+    // Remove after 5 seconds (failsafe)
+    setTimeout(() => {
+      if (this.scene.getObjectById(fireball.id)) {
+        this.removeFromAnimationLoop(animationId);
+        this.scene.remove(fireball);
+      }
+    }, 5000);
+  }
+  
+  private showExplosionEffect(position: { x: number, y: number, z: number }): void {
+    // Create explosion particles
+    const particleCount = 100;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    
+    for (let i = 0; i &lt; particleCount; i++) {
+      const i3 = i * 3;
+      positions[i3] = position.x;
+      positions[i3 + 1] = position.y;
+      positions[i3 + 2] = position.z;
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    
+    const material = new THREE.PointsMaterial({
+      color: 0xff4500,
+      size: 0.2,
+      blending: THREE.AdditiveBlending,
+      transparent: true
+    });
+    
+    const particles = new THREE.Points(geometry, material);
+    this.scene.add(particles);
+    
+    // Create velocities for particles
+    const velocities = [];
+    for (let i = 0; i &lt; particleCount; i++) {
+      velocities.push({
+        x: (Math.random() - 0.5) * 2,
+        y: (Math.random() - 0.5) * 2,
+        z: (Math.random() - 0.5) * 2
+      });
+    }
+    
+    // Animate particles
+    let opacity = 1;
+    const animate = () => {
+      const positions = particles.geometry.attributes.position.array as Float32Array;
+      
+      for (let i = 0; i &lt; particleCount; i++) {
+        const i3 = i * 3;
+        positions[i3] += velocities[i].x * 0.1;
+        positions[i3 + 1] += velocities[i].y * 0.1;
+        positions[i3 + 2] += velocities[i].z * 0.1;
+      }
+      
+      particles.geometry.attributes.position.needsUpdate = true;
+      
+      opacity -= 0.02;
+      particles.material.opacity = Math.max(0, opacity);
+    };
+    
+    // Add to animation loop
+    const animationId = this.addToAnimationLoop(animate);
+    
+    // Remove after 2 seconds
+    setTimeout(() => {
+      this.removeFromAnimationLoop(animationId);
+      this.scene.remove(particles);
+    }, 2000);
+  }
+  
+  public showGameStartUI(): void {
+    // Create a game start overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'game-start-overlay';
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    overlay.style.display = 'flex';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.color = 'white';
+    overlay.style.fontSize = '48px';
+    overlay.style.fontWeight = 'bold';
+    
+    // Add countdown
+    overlay.textContent = 'Game Starting in 3';
+    this.container.appendChild(overlay);
+    
+    // Countdown animation
+    setTimeout(() => {
+      overlay.textContent = 'Game Starting in 2';
+      setTimeout(() => {
+        overlay.textContent = 'Game Starting in 1';
+        setTimeout(() => {
+          overlay.textContent = 'GO!';
+          setTimeout(() => {
+            this.container.removeChild(overlay);
+          }, 1000);
+        }, 1000);
+      }, 1000);
+    }, 1000);
+  }
+  
+  public showGameEndUI(results: any): void {
+    // Create a game end overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'game-end-overlay';
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    overlay.style.display = 'flex';
+    overlay.style.flexDirection = 'column';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.color = 'white';
+    
+    // Add game over text
+    const gameOverText = document.createElement('h1');
+    gameOverText.textContent = 'Game Over';
+    gameOverText.style.fontSize = '48px';
+    gameOverText.style.marginBottom = '20px';
+    overlay.appendChild(gameOverText);
+    
+    // Add winner text if available
+    if (results.winnerId) {
+      const winnerText = document.createElement('h2');
+      const winnerName = results.playerStats.find((p: any) => p.id === results.winnerId)?.name || 'Unknown';
+      winnerText.textContent = `Winner: ${winnerName}`;
+      winnerText.style.fontSize = '36px';
+      winnerText.style.marginBottom = '20px';
+      overlay.appendChild(winnerText);
+    }
+    
+    // Add player stats
+    const statsContainer = document.createElement('div');
+    statsContainer.style.width = '80%';
+    statsContainer.style.maxWidth = '600px';
+    statsContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    statsContainer.style.padding = '20px';
+    statsContainer.style.borderRadius = '10px';
+    
+    // Add table header
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+    table.style.color = 'white';
+    
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    
+    const headers = ['Player', 'Character', 'Kills'];
+    headers.forEach(headerText => {
+      const th = document.createElement('th');
+      th.textContent = headerText;
+      th.style.padding = '10px';
+      th.style.textAlign = 'left';
+      th.style.borderBottom = '1px solid white';
+      headerRow.appendChild(th);
+    });
+    
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    
+    // Add player rows
+    const tbody = document.createElement('tbody');
+    results.playerStats.forEach((player: any) => {
+      const row = document.createElement('tr');
+      
+      const nameCell = document.createElement('td');
+      nameCell.textContent = player.name;
+      nameCell.style.padding = '10px';
+      
+      const characterCell = document.createElement('td');
+      characterCell.textContent = player.characterType;
+      characterCell.style.padding = '10px';
+      
+      const killsCell = document.createElement('td');
+      killsCell.textContent = player.kills.toString();
+      killsCell.style.padding = '10px';
+      
+      row.appendChild(nameCell);
+      row.appendChild(characterCell);
+      row.appendChild(killsCell);
+      
+      tbody.appendChild(row);
+    });
+    
+    table.appendChild(tbody);
+    statsContainer.appendChild(table);
+    overlay.appendChild(statsContainer);
+    
+    // Add return to lobby button
+    const returnButton = document.createElement('button');
+    returnButton.textContent = 'Return to Lobby';
+    returnButton.style.marginTop = '20px';
+    returnButton.style.padding = '10px 20px';
+    returnButton.style.fontSize = '18px';
+    returnButton.style.backgroundColor = '#4CAF50';
+    returnButton.style.border = 'none';
+    returnButton.style.borderRadius = '5px';
+    returnButton.style.color = 'white';
+    returnButton.style.cursor = 'pointer';
+    
+    returnButton.addEventListener('click', () => {
+      // Handle return to lobby
+      window.location.reload(); // Simple reload for this example
+    });
+    
+    overlay.appendChild(returnButton);
+    this.container.appendChild(overlay);
+  }
+  
+  // Animation loop management
+  private animations: Map<number, () => void> = new Map();
+  private nextAnimationId = 0;
+  
+  private addToAnimationLoop(animationFn: () => void): number {
+    const id = this.nextAnimationId++;
+    this.animations.set(id, animationFn);
+    return id;
+  }
+  
+  private removeFromAnimationLoop(id: number): void {
+    this.animations.delete(id);
+  }
+  
+  // Update method to run all animations
+  public update(delta: number): void {
+    this.animations.forEach(animationFn => animationFn());
+  }
+}
+```
+
+## Performance Optimization
+
+```typescript
+// client/src/game/Optimizations.ts
+import * as THREE from 'three';
+
+export class Optimizations {
+  // Level of detail management
+  public static setupLOD(scene: THREE.Scene): void {
+    // Set up frustum culling
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.frustumCulled = true;
+      }
+    });
+  }
+  
+  // Object pooling for projectiles
+  public static createProjectilePool(
+    scene: THREE.Scene,
+    count: number,
+    types: string[]
+  ): Map<string, THREE.Object3D[]> {
+    const pools: Map<string, THREE.Object3D[]> = new Map();
+    
+    types.forEach(type => {
+      const pool: THREE.Object3D[] = [];
+      
+      for (let i = 0; i &lt; count; i++) {
+        let mesh;
+        
+        switch (type) {
+          case "fireball":
+            mesh = new THREE.Mesh(
+              new THREE.SphereGeometry(0.5, 8, 8),
+              new THREE.MeshBasicMaterial({ color: 0xff4500 })
+            );
+            break;
+          case "arrow":
+            mesh = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.05, 0.05, 1, 8),
+              new THREE.MeshBasicMaterial({ color: 0x8b4513 })
+            );
+            break;
+          default:
+            mesh = new THREE.Mesh(
+              new THREE.SphereGeometry(0.3, 8, 8),
+              new THREE.MeshBasicMaterial({ color: 0xffff00 })
+            );
+        }
+        
+        mesh.visible = false;
+        scene.add(mesh);
+        pool.push(mesh);
+      }
+      
+      pools.set(type, pool);
+    });
+    
+    return pools;
+  }
+  
+  // Get object from pool
+  public static getFromPool(
+    pools: Map<string, THREE.Object3D[]>,
+    type: string
+  ): THREE.Object3D | null {
+    if (!pools.has(type)) return null;
+    
+    const pool = pools.get(type)!;
+    for (const object of pool) {
+      if (!object.visible) {
+        object.visible = true;
+        return object;
       }
     }
-  }
-  
-  registerAbilityIcon(abilityId, iconElement) {
-    this.abilityIcons[abilityId] = iconElement;
-  }
-}
-```
-
-## Client-Side Prediction
-
-For smoother gameplay, implement client-side prediction:
-
-```typescript
-class ClientPrediction {
-  constructor(room, $) {
-    this.room = room;
-    this.$ = $;
-    this.localPlayer = null;
-    this.serverPosition = { x: 0, y: 0 };
-    this.predictedPosition = { x: 0, y: 0 };
-    this.lastInput = { x: 0, y: 0, speed: 0 };
-    this.lastInputTime = 0;
-    this.reconciliationThreshold = 10; // pixels
-  }
-  
-  initialize(playerId) {
-    this.localPlayer = this.room.state.players.get(playerId);
-    if (!this.localPlayer) return;
     
-    // Track server position
-    $(this.localPlayer).position.listen("x", (value) => {
-      this.serverPosition.x = value;
-      this.reconcile();
+    return null; // Pool exhausted
+  }
+  
+  // Return object to pool
+  public static returnToPool(object: THREE.Object3D): void {
+    object.visible = false;
+  }
+  
+  // Optimize textures
+  public static optimizeTextures(scene: THREE.Scene): void {
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        const material = object.material as THREE.MeshBasicMaterial;
+        
+        if (material.map) {
+          material.map.minFilter = THREE.LinearFilter;
+          material.map.generateMipmaps = false;
+        }
+      }
+    });
+  }
+  
+  // Batch similar objects
+  public static batchObjects(
+    scene: THREE.Scene,
+    objects: THREE.Object3D[],
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material
+  ): THREE.InstancedMesh {
+    const instancedMesh = new THREE.InstancedMesh(
+      geometry,
+      material,
+      objects.length
+    );
+    
+    const matrix = new THREE.Matrix4();
+    
+    objects.forEach((object, i) => {
+      matrix.setPosition(object.position);
+      instancedMesh.setMatrixAt(i, matrix);
+      scene.remove(object);
     });
     
-    $(this.localPlayer).position.listen("y", (value) => {
-      this.serverPosition.y = value;
-      this.reconcile();
-    });
-    
-    // Initialize predicted position
-    this.predictedPosition.x = this.localPlayer.position.x;
-    this.predictedPosition.y = this.localPlayer.position.y;
+    scene.add(instancedMesh);
+    return instancedMesh;
   }
-  
-  move(x, y, speed) {
-    // Send input to server
-    this.room.send("move", { x, y, speed });
-    
-    // Store input for prediction
-    this.lastInput = { x, y, speed };
-    this.lastInputTime = Date.now();
-    
-    // Apply prediction immediately
-    this.applyPrediction();
-  }
-  
-  applyPrediction() {
-    // Simple prediction based on last input
-    const now = Date.now();
-    const dt = (now - this.lastInputTime) / 1000;
-    
-    this.predictedPosition.x += this.lastInput.x * this.lastInput.speed * dt;
-    this.predictedPosition.y += this.lastInput.y * this.lastInput.speed * dt;
-    
-    // Update last input time
-    this.lastInputTime = now;
-    
-    return this.predictedPosition;
-  }
-  
-  reconcile() {
-    // Check if server and predicted positions are too far apart
-    const dx = this.serverPosition.x - this.predictedPosition.x;
-    const dy = this.serverPosition.y - this.predictedPosition.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    if (distance > this.reconciliationThreshold) {
-      // Snap to server position if too far
-      this.predictedPosition.x = this.serverPosition.x;
-      this.predictedPosition.y = this.serverPosition.y;
-    } else if (distance > 0) {
-      // Lerp towards server position
-      this.predictedPosition.x += dx * 0.2;
-      this.predictedPosition.y += dy * 0.2;
-    }
-    
-    return this.predictedPosition;
-  }
-  
-  getPosition() {
-    return this.predictedPosition;
-  }
-}
-```
-
-## Best Practices
-
-### Optimizing Network Traffic
-
-```typescript
-// Only send movement updates when they change
-let lastMovement = { x: 0, y: 0, speed: 0 };
-
-function optimizedMove(room, x, y, speed) {
-  // Only send if movement has changed
-  if (
-    x !== lastMovement.x ||
-    y !== lastMovement.y ||
-    speed !== lastMovement.speed
-  ) {
-    room.send("move", { x, y, speed });
-    lastMovement = { x, y, speed };
-  }
-}
-```
-
-### Handling Reconnection
-
-```typescript
-async function handleReconnection(client, roomId, roomType, options) {
-  try {
-    // Try to reconnect to the same room
-    const room = await client.reconnect(roomId);
-    console.log("Successfully reconnected to room:", roomId);
-    return room;
-  } catch (error) {
-    console.error("Failed to reconnect:", error);
-    
-    // If reconnection fails, join a new room
-    try {
-      const newRoom = await client.joinOrCreate(roomType, options);
-      console.log("Joined new room:", newRoom.id);
-      return newRoom;
-    } catch (joinError) {
-      console.error("Failed to join new room:", joinError);
-      throw joinError;
-    }
-  }
-}
-```
-
-### Debugging
-
-```typescript
-function enableDebugMode(room, $) {
-  // Log all state changes
-  $(room.state).listen("*", (prop, value) => {
-    console.log(`[DEBUG] State property changed: ${prop} =`, value);
-  });
-  
-  // Log all messages
-  const originalOnMessage = room.onMessage;
-  room.onMessage = function(type, callback) {
-    if (type === "*") {
-      originalOnMessage.call(room, "*", (messageType, message) => {
-        console.log(`[DEBUG] Message received: ${messageType} =`, message);
-        callback(messageType, message);
-      });
-    } else {
-      originalOnMessage.call(room, type, (message) => {
-        console.log(`[DEBUG] Message received: ${type} =`, message);
-        callback(message);
-      });
-    }
-  };
-  
-  return {
-    disableDebug: () => {
-      room.onMessage = originalOnMessage;
-    }
-  };
 }
 ```
 
 ## Troubleshooting
 
-### Common Issues and Solutions
-
-1. **Connection Issues**
-
-
 ```typescript
-function diagnoseConnectionIssues(client) {
-  // Check if WebSocket is supported
-  if (!window.WebSocket) {
-    console.error("WebSocket is not supported in this browser");
-    return false;
-  }
-  
-  // Test connection
-  client.pingService()
-    .then(pong => {
-      console.log("Server is reachable, ping:", pong.ping);
-    })
-    .catch(error => {
-      console.error("Server is unreachable:", error);
-    });
-  
-  return true;
-}
-```
+// client/src/utils/Debugging.ts
+import { Room } from "colyseus.js";
 
-2. **State Synchronization Issues**
-
-
-```typescript
-function validateStateSync(room) {
-  // Check if state exists
-  if (!room.state) {
-    console.error("Room state is undefined");
-    return false;
-  }
+export class Debugging {
+  private static instance: Debugging;
+  private enabled: boolean = false;
+  private logElement: HTMLElement | null = null;
   
-  // Check if expected collections exist
-  const expectedCollections = ["players", "projectiles"];
-  for (const collection of expectedCollections) {
-    if (!room.state[collection]) {
-      console.error(`Expected collection '${collection}' is missing from state`);
-      return false;
+  private constructor() {
+    // Create debug UI if enabled
+    if (this.enabled) {
+      this.createDebugUI();
     }
   }
   
-  return true;
+  public static getInstance(): Debugging {
+    if (!Debugging.instance) {
+      Debugging.instance = new Debugging();
+    }
+    return Debugging.instance;
+  }
+  
+  public enableDebugging(enabled: boolean): void {
+    this.enabled = enabled;
+    
+    if (enabled && !this.logElement) {
+      this.createDebugUI();
+    } else if (!enabled && this.logElement) {
+      this.removeDebugUI();
+    }
+  }
+  
+  private createDebugUI(): void {
+    this.logElement = document.createElement('div');
+    this.logElement.className = 'debug-log';
+    this.logElement.style.position = 'absolute';
+    this.logElement.style.top = '10px';
+    this.logElement.style.right = '10px';
+    this.logElement.style.width = '300px';
+    this.logElement.style.height = '200px';
+    this.logElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    this.logElement.style.color = 'white';
+    this.logElement.style.padding = '10px';
+    this.logElement.style.overflow = 'auto';
+    this.logElement.style.fontFamily = 'monospace';
+    this.logElement.style.fontSize = '12px';
+    this.logElement.style.zIndex = '1000';
+    
+    document.body.appendChild(this.logElement);
+  }
+  
+  private removeDebugUI(): void {
+    if (this.logElement && this.logElement.parentNode) {
+      this.logElement.parentNode.removeChild(this.logElement);
+      this.logElement = null;
+    }
+  }
+  
+  public log(message: string): void {
+    console.log(message);
+    
+    if (this.enabled && this.logElement) {
+      const logEntry = document.createElement('div');
+      logEntry.textContent = `[${new Date().toISOString()}] ${message}`;
+      this.logElement.appendChild(logEntry);
+      this.logElement.scrollTop = this.logElement.scrollHeight;
+      
+      // Limit log entries
+      while (this.logElement.childNodes.length > 50) {
+        this.logElement.removeChild(this.logElement.firstChild!);
+      }
+    }
+  }
+  
+  public monitorRoom(room: Room): void {
+    if (!this.enabled) return;
+    
+    room.onStateChange((state) => {
+      this.log(`State updated: ${Object.keys(state).length} keys`);
+    });
+    
+    room.onMessage("*", (type, message) => {
+      this.log(`Message: ${type} - ${JSON.stringify(message).substring(0, 100)}...`);
+    });
+    
+    room.onError((code, message) => {
+      this.log(`ERROR (${code}): ${message}`);
+    });
+  }
+  
+  public showNetworkStats(room: Room): void {
+    if (!this.enabled || !this.logElement) return;
+    
+    // Create network stats element
+    const statsElement = document.createElement('div');
+    statsElement.className = 'network-stats';
+    statsElement.style.position = 'absolute';
+    statsElement.style.top = '220px';
+    statsElement.style.right = '10px';
+    statsElement.style.width = '300px';
+    statsElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    statsElement.style.color = 'white';
+    statsElement.style.padding = '10px';
+    statsElement.style.fontFamily = 'monospace';
+    statsElement.style.fontSize = '12px';
+    statsElement.style.zIndex = '1000';
+    
+    document.body.appendChild(statsElement);
+    
+    // Update stats periodically
+    setInterval(() => {
+      if (!room.connection.isOpen) {
+        statsElement.innerHTML = 'Connection closed';
+        return;
+      }
+      
+      const latency = room.connection.pingService.average;
+      const state = room.state ? Object.keys(room.state).length : 0;
+      
+      statsElement.innerHTML = `
+        <div>Latency: ${latency.toFixed(2)}ms</div>
+        <div>State size: ${state} keys</div>
+        <div>Room ID: ${room.id}</div>
+        <div>Session ID: ${room.sessionId}</div>
+      `;
+    }, 1000);
+  }
 }
 ```
 
-3. **Message Handling Issues**
+## Putting It All Together
 
+Here's how to integrate all the components:
 
 ```typescript
-function setupMessageLogging(room) {
-  // Track sent messages
-  const originalSend = room.send;
-  room.send = function(type, message) {
-    console.log(`[SENT] ${type}:`, message);
-    return originalSend.call(room, type, message);
-  };
+// client/src/index.ts
+import { ColyseusClient } from "./services/ColyseusClient";
+import { LobbyService } from "./services/LobbyService";
+import { BattleService } from "./services/BattleService";
+import { BattleScene } from "./game/BattleScene";
+import { BattleUI } from "./game/BattleUI";
+import { StateManager } from "./game/StateManager";
+import { EventManager } from "./game/EventManager";
+import { Debugging } from "./utils/Debugging";
+
+// Enable debugging in development
+const debugging = Debugging.getInstance();
+debugging.enableDebugging(process.env.NODE_ENV === 'development');
+
+// Initialize Colyseus client
+const endpoint = process.env.COLYSEUS_ENDPOINT || "ws://localhost:2567";
+const colyseusClient = ColyseusClient.getInstance(endpoint);
+
+// Initialize services
+const lobbyService = new LobbyService(colyseusClient);
+const battleService = new BattleService(colyseusClient);
+
+// DOM elements
+const lobbyContainer = document.getElementById('lobby-container') as HTMLElement;
+const gameContainer = document.getElementById('game-container') as HTMLElement;
+
+// Show lobby UI
+function showLobbyUI() {
+  lobbyContainer.style.display = 'block';
+  gameContainer.style.display = 'none';
   
-  // Track received messages
-  room.onMessage("*", (type, message) => {
-    console.log(`[RECEIVED] ${type}:`, message);
+  // Clear previous content
+  lobbyContainer.innerHTML = '';
+  
+  // Create login form if not connected
+  if (!lobbyService.getLobbyRoom()) {
+    createLoginForm();
+  } else {
+    createLobbyInterface();
+  }
+}
+
+// Create login form
+function createLoginForm() {
+  const form = document.createElement('form');
+  form.className = 'login-form';
+  
+  const heading = document.createElement('h2');
+  heading.textContent = 'Join Lobby';
+  
+  const usernameInput = document.createElement('input');
+  usernameInput.type = 'text';
+  usernameInput.placeholder = 'Username';
+  usernameInput.required = true;
+  
+  const submitButton = document.createElement('button');
+  submitButton.type = 'submit';
+  submitButton.textContent = 'Join';
+  
+  form.appendChild(heading);
+  form.appendChild(usernameInput);
+  form.appendChild(submitButton);
+  
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = usernameInput.value.trim();
+    
+    if (username) {
+      try {
+        await lobbyService.joinLobby(username);
+        createLobbyInterface();
+      } catch (error) {
+        console.error("Error joining lobby:", error);
+        alert(`Failed to join lobby: ${error}`);
+      }
+    }
+  });
+  
+  lobbyContainer.appendChild(form);
+}
+
+// Create lobby interface
+function createLobbyInterface() {
+  const container = document.createElement('div');
+  container.className = 'lobby-interface';
+  
+  // Create game list section
+  const gameListSection = document.createElement('div');
+  gameListSection.className = 'game-list-section';
+  
+  const gameListHeading = document.createElement('h2');
+  gameListHeading.textContent = 'Available Games';
+  
+  const gameTypeFilter = document.createElement('select');
+  gameTypeFilter.innerHTML = `
+    <option value="">All Games</option>
+    <option value="battle">Battle</option>
+    <option value="race">Race</option>
+    <option value="platformer">Platformer</option>
+  `;
+  
+  const refreshButton = document.createElement('button');
+  refreshButton.textContent = 'Refresh';
+  refreshButton.addEventListener('click', () => {
+    const gameType = gameTypeFilter.value;
+    lobbyService.requestActiveLobbies(gameType || undefined);
+  });
+  
+  const gameList = document.createElement('div');
+  gameList.className = 'game-list';
+  
+  gameListSection.appendChild(gameListHeading);
+  gameListSection.appendChild(gameTypeFilter);
+  gameListSection.appendChild(refreshButton);
+  gameListSection.appendChild(gameList);
+  
+  // Create game creation section
+  const createGameSection = document.createElement('div');
+  createGameSection.className = 'create-game-section';
+  
+  const createGameHeading = document.createElement('h2');
+  createGameHeading.textContent = 'Create New Game';
+  
+  const createGameForm = document.createElement('form');
+  createGameForm.innerHTML = `
+    <div>
+      <label for="gameType">Game Type:</label>
+      <select id="gameType" required>
+        <option value="battle">Battle</option>
+        <option value="race">Race</option>
+        <option value="platformer">Platformer</option>
+      </select>
+    </div>
+    <div>
+      <label for="gameName">Game Name:</label>
+      <input type="text" id="gameName" required>
+    </div>
+    <div>
+      <label for="maxPlayers">Max Players:</label>
+      <input type="number" id="maxPlayers" min="2" max="16" value="8" required>
+    </div>
+    <button type="submit">Create Game</button>
+  `;
+  
+  createGameForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const gameType = (document.getElementById('gameType') as HTMLSelectElement).value;
+    const gameName = (document.getElementById('gameName') as HTMLInputElement).value;
+    const maxPlayers = parseInt((document.getElementById('maxPlayers') as HTMLInputElement).value);
+    
+    lobbyService.createGame(gameType, gameName, maxPlayers);
+  });
+  
+  createGameSection.appendChild(createGameHeading);
+  createGameSection.appendChild(createGameForm);
+  
+  // Add sections to container
+  container.appendChild(gameListSection);
+  container.appendChild(createGameSection);
+  
+  // Clear and add to lobby container
+  lobbyContainer.innerHTML = '';
+  lobbyContainer.appendChild(container);
+  
+  // Set up lobby listeners
+  lobbyService.setActiveLobbiesListener((lobbies) => {
+    updateGameList(gameList, lobbies);
+  });
+  
+  // Initial request for lobbies
+  lobbyService.requestActiveLobbies();
+}
+
+// Update game list
+function updateGameList(gameListElement: HTMLElement, lobbies: any[]) {
+  gameListElement.innerHTML = '';
+  
+  if (lobbies.length === 0) {
+    const noGamesMessage = document.createElement('div');
+    noGamesMessage.className = 'no-games-message';
+    noGamesMessage.textContent = 'No active games found. Create one!';
+    gameListElement.appendChild(noGamesMessage);
+    return;
+  }
+  
+  lobbies.forEach(game => {
+    const gameItem = document.createElement('div');
+    gameItem.className = 'game-item';
+    
+    gameItem.innerHTML = `
+      <div class="game-info">
+        <h3>${game.name}</h3>
+        <p>Type: ${game.type}</p>
+        <p>Players: ${game.currentPlayers}/${game.maxPlayers}</p>
+      </div>
+      <button class="join-button">Join</button>
+    `;
+    
+    const joinButton = gameItem.querySelector('.join-button') as HTMLButtonElement;
+    joinButton.addEventListener('click', async () => {
+      try {
+        // Join the battle room
+        await battleService.joinBattleRoom(game.id, {
+          username: lobbyService.getLobbyRoom()?.sessionId || 'Player',
+          characterType: 'warrior'
+        });
+        
+        // Show game UI
+        showGameUI();
+      } catch (error) {
+        console.error("Error joining game:", error);
+        alert(`Failed to join game: ${error}`);
+      }
+    });
+    
+    gameListElement.appendChild(gameItem);
   });
 }
-```
 
-## Complete Example: Integrating with a Game Engine
+// Show game UI
+async function showGameUI() {
+  lobbyContainer.style.display = 'none';
+  gameContainer.style.display = 'block';
+  
+  // Clear previous content
+  gameContainer.innerHTML = '';
+  
+  // Create character selection UI
+  const characterSelectionUI = document.createElement('div');
+  characterSelectionUI.className = 'character-selection';
+  characterSelectionUI.innerHTML = `
+    <h2>Select Your Character</h2>
+    <div class="character-options">
+      <div class="character-option" data-type="warrior">
+        <img src="/assets/warrior.png" alt="Warrior">
+        <h3>Warrior</h3>
+        <p>Strong melee fighter with high health</p>
+      </div>
+      <div class="character-option" data-type="mage">
+        <img src="/assets/mage.png" alt="Mage">
+        <h3>Mage</h3>
+        <p>Powerful spellcaster with ranged attacks</p>
+      </div>
+      <div class="character-option" data-type="archer">
+        <img src="/assets/archer.png" alt="Archer">
+        <h3>Archer</h3>
+        <p>Fast ranged attacker with high mobility</p>
+      </div>
+    </div>
+    <button id="ready-button" disabled>Ready</button>
+  `;
+  
+  gameContainer.appendChild(characterSelectionUI);
+  
+  // Handle character selection
+  let selectedCharacter = '';
+  const characterOptions = characterSelectionUI.querySelectorAll('.character-option');
+  const readyButton = document.getElementById('ready-button') as HTMLButtonElement;
+  
+  characterOptions.forEach(option => {
+    option.addEventListener('click', () => {
+      // Remove selected class from all options
+      characterOptions.forEach(opt => opt.classList.remove('selected'));
+      
+      // Add selected class to clicked option
+      option.classList.add('selected');
+      
+      // Get character type
+      selectedCharacter = option.getAttribute('data-type') || '';
+      
+      // Enable ready button
+      readyButton.disabled = false;
+      
+      // Change character in the game
+      battleService.changeCharacter(selectedCharacter);
+    });
+  });
+  
+  // Handle ready button
+  readyButton.addEventListener('click', () => {
+    // Set player as ready
+    battleService.setReady(true);
+    
+    // Hide character selection
+    characterSelectionUI.style.display = 'none';
+    
+    // Initialize game scene
+    initializeGameScene();
+  });
+}
 
-Here's an example of integrating with a game engine like Phaser:
-
-```typescript
-import { Client, getStateCallbacks } from "colyseus.js";
-import Phaser from "phaser";
-
-class GameScene extends Phaser.Scene {
-  constructor() {
-    super({ key: "GameScene" });
-    this.client = new Client("ws://your-server-address:2567");
-    this.room = null;
-    this.$ = null;
-    this.players = {};
-    this.projectiles = {};
-    this.platforms = [];
-    this.collectibles = [];
-    this.enemies = [];
-    this.localPlayerId = null;
-  }
+// Initialize game scene
+function initializeGameScene() {
+  // Create battle scene
+  const battleScene = new BattleScene(gameContainer);
   
-  preload() {
-    // Load assets
-    this.load.image("player", "assets/player.png");
-    this.load.image("projectile", "assets/projectile.png");
-    this.load.image("platform", "assets/platform.png");
-    this.load.image("collectible", "assets/collectible.png");
-    this.load.image("enemy", "assets/enemy.png");
-  }
+  // Connect battle scene with service
+  battleService.setBattleScene(battleScene);
   
-  async create() {
-    // Connect to room
-    try {
-      this.room = await this.client.joinOrCreate("platformer", {
-        username: "Player" + Math.floor(Math.random() * 1000),
-        characterType: "knight"
-      });
-      
-      this.$ = getStateCallbacks(this.room);
-      this.localPlayerId = this.room.sessionId;
-      
-      // Set up message handlers
-      this.setupMessageHandlers();
-      
-      // Set up state synchronization
-      this.setupStateSynchronization();
-      
-      // Set up input handlers
-      this.setupInputHandlers();
-      
-      console.log("Connected to room:", this.room.id);
-    } catch (error) {
-      console.error("Failed to join room:", error);
-    }
-  }
+  // Create battle UI
+  const battleUI = new BattleUI(gameContainer, battleService);
   
-  setupMessageHandlers() {
-    this.room.onMessage("level_data", (message) => {
-      // Create level from received data
-      this.createLevel(message);
-    });
-    
-    this.room.onMessage("game_started", () => {
-      // Start game UI and animations
-    });
-    
-    this.room.onMessage("game_ended", (message) => {
-      // Show game over screen with results
-    });
-    
-    // More message handlers...
-  }
+  // Create state manager
+  const stateManager = new StateManager(
+    battleService.getBattleRoom()!,
+    battleScene
+  );
   
-  setupStateSynchronization() {
-    // Track players
-    $(this.room.state).players.onAdd((player, sessionId) => {
-      // Create player sprite
-      this.players[sessionId] = this.createPlayerSprite(player, sessionId);
-      
-      // Listen for position changes
-      $(player).position.listen("x", (value) => {
-        if (this.players[sessionId]) {
-          this.players[sessionId].x = value;
-        }
-      });
-      
-      $(player).position.listen("y", (value) => {
-        if (this.players[sessionId]) {
-          this.players[sessionId].y = value;
-        }
-      });
-      
-      // More property listeners...
-    });
-    
-    $(this.room.state).players.onRemove((player, sessionId) => {
-      // Remove player sprite
-      if (this.players[sessionId]) {
-        this.players[sessionId].destroy();
-        delete this.players[sessionId];
-      }
-    });
-    
-    // Track platforms, collectibles, enemies...
-  }
+  // Create event manager
+  const eventManager = new EventManager(
+    battleService.getBattleRoom()!,
+    battleScene
+  );
   
-  createPlayerSprite(player, sessionId) {
-    const sprite = this.add.sprite(player.position.x, player.position.y, "player");
-    
-    // Set sprite properties based on character type
-    switch (player.characterType) {
-      case "knight":
-        sprite.setTint(0xFF0000);
-        break;
-      case "mage":
-        sprite.setTint(0x0000FF);
-        break;
-      case "rogue":
-        sprite.setTint(0x00FF00);
-        break;
-    }
-    
-    // Add name label
-    const nameText = this.add.text(0, -40, player.name, {
-      fontSize: "16px",
-      fill: "#FFFFFF"
-    });
-    nameText.setOrigin(0.5);
-    
-    // Create container with sprite and text
-    const container = this.add.container(player.position.x, player.position.y, [sprite, nameText]);
-    
-    // Highlight local player
-    if (sessionId === this.localPlayerId) {
-      const highlight = this.add.circle(0, 0, 30, 0xFFFF00, 0.3);
-      container.add(highlight);
-    }
-    
-    return container;
-  }
-  
-  setupInputHandlers() {
-    // Set up keyboard controls
-    this.cursors = this.input.keyboard.createCursorKeys();
-    
-    // Jump key
-    this.input.keyboard.on("keydown-SPACE", () => {
-      this.room.send("jump");
-    });
-    
-    // Attack key
-    this.input.keyboard.on("keydown-Z", () => {
-      this.room.send("attack");
-    });
-    
-    // Ability key
-    this.input.keyboard.on("keydown-X", () => {
-      // Get mouse position for targeted abilities
-      const worldPoint = this.input.activePointer.positionToCamera(this.cameras.main);
-      this.room.send("use_ability", { targetPosition: { x: worldPoint.x, y: worldPoint.y } });
-    });
-  }
-  
-  update() {
-    // Handle movement input
-    if (this.room && this.cursors) {
-      let direction = 0;
-      
-      if (this.cursors.left.isDown) {
-        direction = -1;
-      } else if (this.cursors.right.isDown) {
-        direction = 1;
-      }
-      
-      // Only send if direction changed
-      if (this.lastDirection !== direction) {
-        this.room.send("move", { direction });
-        this.lastDirection = direction;
-      }
-    }
-  }
-  
-  createLevel(levelData) {
-    // Create platforms
-    levelData.platforms.forEach(platformData => {
-      const platform = this.add.sprite(
-        platformData.x,
-        platformData.y,
-        "platform"
-      );
-      platform.displayWidth = platformData.width;
-      platform.displayHeight = platformData.height;
-      this.platforms.push(platform);
-    });
-    
-    // Create collectibles
-    levelData.collectibles.forEach(collectibleData => {
-      const collectible = this.add.sprite(
-        collectibleData.x,
-        collectibleData.y,
-        "collectible"
-      );
-      
-      // Set appearance based on type
-      if (collectibleData.type === "gem") {
-        collectible.setTint(0x00FFFF);
-      } else {
-        collectible.setTint(0xFFFF00);
-      }
-      
-      this.collectibles.push({
-        sprite: collectible,
-        id: collectibleData.id
-      });
-    });
-    
-    // Create enemies
-    levelData.enemies.forEach(enemyData => {
-      const enemy = this.add.sprite(
-        enemyData.x,
-        enemyData.y,
-        "enemy"
-      );
-      
-      // Set appearance based on type
-      if (enemyData.type === "flying") {
-        enemy.setTint(0xFF00FF);
-      } else {
-        enemy.setTint(0xFF0000);
-      }
-      
-      this.enemies.push({
-        sprite: enemy,
-        id: enemyData.id
-      });
-    });
+  // Enable debugging if in development
+  if (process.env.NODE_ENV === 'development') {
+    debugging.monitorRoom(battleService.getBattleRoom()!);
+    debugging.showNetworkStats(battleService.getBattleRoom()!);
   }
 }
+
+// Start the application
+showLobbyUI();
 ```
 
 ## Conclusion
 
-This guide covers the essential aspects of implementing a client for our Colyseus v0.16 game server. By following these patterns and examples, you can create robust client applications that interact seamlessly with the server.
+This guide provides a comprehensive implementation of both the lobby system and Three.js-based battle game using Colyseus v16. The client-side code is designed to work with the server-side implementation described in the repository.
 
-Remember to:
+Key features implemented:
 
-1. Use the new `$()` proxy for state callbacks
-2. Implement client-side prediction for smoother gameplay
-3. Handle reconnection scenarios
-4. Optimize network traffic by only sending necessary updates
-5. Add proper error handling and debugging tools
+- Lobby system for creating and joining games
+- Three.js integration for 3D rendering
+- Player movement and shooting mechanics
+- Abilities system with visual effects
+- State synchronization with interpolation
+- Event handling for game events
+- Performance optimizations
+- Debugging tools
 
 
-For more information, refer to the [official Colyseus documentation](https://docs.colyseus.io/).
+For the best experience, ensure your server is properly configured with the Colyseus v16 implementation as described in the server code.
+
+## Additional Resources
+
+- [Colyseus Documentation](https://docs.colyseus.io/)
+- [Three.js Documentation](https://threejs.org/docs/)
+- [TypeScript Documentation](https://www.typescriptlang.org/docs/)
