@@ -1,4 +1,4 @@
-import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema"
+import { Schema, MapSchema, type } from "@colyseus/schema"
 import { Player } from "./Player"
 import { Projectile } from "./Projectile"
 import { Vector3D } from "./Vector3D"
@@ -15,7 +15,7 @@ export class MapObject extends Schema {
 export class BattleState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>()
   @type({ map: Projectile }) projectiles = new MapSchema<Projectile>()
-  @type([MapObject]) mapObjects = new ArraySchema<MapObject>()
+  @type([MapObject]) mapObjects = [] // Static map objects
 
   // Map dimensions and properties
   @type("number") mapWidth = 100

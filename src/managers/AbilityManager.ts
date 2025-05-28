@@ -22,11 +22,6 @@ export class AbilityManager {
   }
 
   useAbility(room: Room, player: Player, abilityId: string, targetPosition: Vector3D | null): boolean {
-    // Check if player can use ability (cooldown)
-    if (!player.canUseAbility(abilityId)) {
-      return false
-    }
-
     let success = false
 
     switch (abilityId) {
@@ -78,6 +73,11 @@ export class AbilityManager {
       default:
         // No ability or basic attack
         return false
+    }
+
+    // Check if player can use ability (cooldown)
+    if (!player.canUseAbility(abilityId)) {
+      return false
     }
 
     if (success) {

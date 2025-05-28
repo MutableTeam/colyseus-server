@@ -23,7 +23,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     this.gravity = options.gravity || this.gravity
 
     // Initialize the room state
-    this.state = new PlatformerState(this.levelWidth, this.levelHeight)
+    this.state = new PlatformerState(this.levelWidth, this.levelHeight);
 
     // Load level data (platforms, collectibles, enemies)
     this.loadLevel(options.levelId || "level1")
