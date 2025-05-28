@@ -678,19 +678,22 @@ export class BattleRoom extends Room<BattleState> {
     }
 
     // Broadcast game end
+    const playerStats: Array<{ id: string; name: string; kills: number; characterType: string }> = []
+
+    this.state.players.forEach((player: Player, id: string) => {
+      playerStats.push({
+        id: id,
+        name: player.name,
+        kills: player.kills,
+        characterType: player.characterType,
+      })
+    })
+
     this.broadcast("game_ended", {
       reason: reason,
       winnerId: winnerId,
       gameTime: this.state.gameTime,
-      playerStats: Array.from(this.state.players.entries()).map((entry: [string, Player]) => {
-        const [id, player] = entry
-        return {
-          id: id,
-          name: player.name,
-          kills: player.kills,
-          characterType: player.characterType,
-        }
-      }),
+      playerStats: playerStats,
     })
 
     // Schedule room disposal
