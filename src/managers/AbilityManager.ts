@@ -31,106 +31,58 @@ export class AbilityManager {
     }
 
     // Set animation state based on ability
-    switch (abilityId) {
-      case "charge":
-        player.animationState = "charging"
-        break
-      case "shockwave":
-        player.animationState = "shockwave"
-        break
-      case "berserk":
-        player.animationState = "berserk"
-        break
-      case "fireball":
-        player.animationState = "casting"
-        break
-      case "teleport":
-        player.animationState = "teleporting"
-        break
-      case "frostNova":
-        player.animationState = "frostNova"
-        break
-      case "multishot":
-        player.animationState = "shooting"
-        break
-      case "trap":
-        player.animationState = "placing"
-        break
-      case "rapidFire":
-        player.animationState = "rapidFire"
-        break
-      case "stealth":
-        player.animationState = "stealth"
-        break
-      case "smokeBomb":
-        player.animationState = "smokeBomb"
-        break
-      case "backstab":
-        player.animationState = "backstab"
-        break
-      case "heal":
-        player.animationState = "healing"
-        break
-      case "shield":
-        player.animationState = "shielding"
-        break
-      case "revive":
-        player.animationState = "reviving"
-        break
-      default:
-        // No ability or basic attack
-        return false
+    const animationStates: { [key: string]: string } = {
+      charge: "charging",
+      shockwave: "shockwave",
+      berserk: "berserk",
+      fireball: "casting",
+      teleport: "teleporting",
+      frostNova: "frostNova",
+      multishot: "shooting",
+      trap: "placing",
+      rapidFire: "rapidFire",
+      stealth: "stealth",
+      smokeBomb: "smokeBomb",
+      backstab: "backstab",
+      heal: "healing",
+      shield: "shielding",
+      revive: "reviving",
     }
 
-    switch (abilityId) {
-      case "charge":
-        success = this.useChargeAbility(room, player, targetPosition)
-        break
-      case "shockwave":
-        success = this.useShockwaveAbility(room, player)
-        break
-      case "berserk":
-        success = this.useBerserkAbility(room, player)
-        break
-      case "fireball":
-        success = this.useFireballAbility(room, player, targetPosition)
-        break
-      case "teleport":
-        success = this.useTeleportAbility(room, player, targetPosition)
-        break
-      case "frostNova":
-        success = this.useFrostNovaAbility(room, player)
-        break
-      case "multishot":
-        success = this.useMultishotAbility(room, player, targetPosition)
-        break
-      case "trap":
-        success = this.useTrapAbility(room, player, targetPosition)
-        break
-      case "rapidFire":
-        success = this.useRapidFireAbility(room, player)
-        break
-      case "stealth":
-        success = this.useStealthAbility(room, player)
-        break
-      case "smokeBomb":
-        success = this.useSmokeBombAbility(room, player)
-        break
-      case "backstab":
-        success = this.useBackstabAbility(room, player, targetPosition)
-        break
-      case "heal":
-        success = this.useHealAbility(room, player, targetPosition)
-        break
-      case "shield":
-        success = this.useShieldAbility(room, player, targetPosition)
-        break
-      case "revive":
-        success = this.useReviveAbility(room, player, targetPosition)
-        break
-      default:
-        // No ability or basic attack
-        return false
+    const animationState = animationStates[abilityId]
+    if (animationState) {
+      player.animationState = animationState
+    } else {
+      // No ability or basic attack
+      return false
+    }
+
+    // Use ability based on abilityId
+    const abilityMethods: { [key: string]: (room: Room, player: Player, targetPosition?: Vector3D | null) => boolean } =
+      {
+        charge: this.useChargeAbility,
+        shockwave: this.useShockwaveAbility,
+        berserk: this.useBerserkAbility,
+        fireball: this.useFireballAbility,
+        teleport: this.useTeleportAbility,
+        frostNova: this.useFrostNovaAbility,
+        multishot: this.useMultishotAbility,
+        trap: this.useTrapAbility,
+        rapidFire: this.useRapidFireAbility,
+        stealth: this.useStealthAbility,
+        smokeBomb: this.useSmokeBombAbility,
+        backstab: this.useBackstabAbility,
+        heal: this.useHealAbility,
+        shield: this.useShieldAbility,
+        revive: this.useReviveAbility,
+      }
+
+    const abilityMethod = abilityMethods[abilityId]
+    if (abilityMethod) {
+      success = abilityMethod(room, player, targetPosition)
+    } else {
+      // No ability or basic attack
+      return false
     }
 
     if (success) {
