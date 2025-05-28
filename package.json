@@ -15,7 +15,7 @@
     "@colyseus/redis-driver": "latest",
     "@colyseus/redis-presence": "latest",
     "@colyseus/schema": "latest",
-    "@colyseus/tools": "latest",
+    "@colyseus/tools": "^0.16.8",
     "@colyseus/uwebsockets-transport": "latest",
     "@colyseus/ws-transport": "latest",
     "@hookform/resolvers": "^3.9.1",
@@ -70,6 +70,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@colyseus/cloud": "^1.0.12",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
