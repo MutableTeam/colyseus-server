@@ -7,7 +7,7 @@ export class RaceRoom extends Room<RaceState> {
   maxClients = 8
 
   // Initialize the room state
-  state = new RaceState();
+  state = new RaceState()
 
   // Race settings
   private trackLength = 5000 // Length of the race track
