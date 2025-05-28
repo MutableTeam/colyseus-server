@@ -25,7 +25,8 @@ export class AbilityManager {
     let success = false
 
     // Check if player can use ability (cooldown)
-    if (!player.canUseAbility(abilityId)) {
+    const canUseAbility = player.canUseAbility(abilityId)
+    if (!canUseAbility) {
       return false
     }
 

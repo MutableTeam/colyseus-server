@@ -706,13 +706,16 @@ export class PlatformerRoom extends Room<PlatformerState> {
 
     // Calculate final scores and rankings
     const playerResults = Array.from(this.state.players.entries())
-      .map(([id, player]) => ({
-        id: id,
-        name: player.name,
-        score: player.score,
-        lives: player.lives,
-      }))
-      .sort((a, b) => b.score - a.score)
+      .map((entry: [string, PlatformerPlayer]) => {
+        const [id, player] = entry
+        return {
+          id: id,
+          name: player.name,
+          score: player.score,
+          lives: player.lives,
+        }
+      })
+      .sort((a: any, b: any) => b.score - a.score)
 
     // Broadcast game end
     this.broadcast("game_ended", {

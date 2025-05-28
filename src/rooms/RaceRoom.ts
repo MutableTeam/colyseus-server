@@ -273,14 +273,17 @@ export class RaceRoom extends Room<RaceState> {
       reason: reason,
       raceTime: this.state.raceTime,
       playerResults: Array.from(this.state.players.entries())
-        .map(([id, player]) => ({
-          id: id,
-          name: player.name,
-          finished: player.finished,
-          finishTime: player.finishTime,
-          position: player.finishPosition,
-        }))
-        .sort((a, b) => {
+        .map((entry: [string, RacePlayer]) => {
+          const [id, player] = entry
+          return {
+            id: id,
+            name: player.name,
+            finished: player.finished,
+            finishTime: player.finishTime,
+            position: player.finishPosition,
+          }
+        })
+        .sort((a: any, b: any) => {
           // Sort by position (finished players first)
           if (a.finished && !b.finished) return -1
           if (!a.finished && b.finished) return 1
