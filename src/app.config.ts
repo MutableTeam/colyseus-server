@@ -29,16 +29,5 @@ export default config({
 
     // Add Colyseus Monitor
     app.use("/colyseus", monitor());
-
-    // Add Colyseus Playground only in development
-    if (process.env.NODE_ENV !== "production") {
-      try {
-        const { playground } = require("@colyseus/playground");
-        app.use("/playground", playground());
-      } catch (e) {
-        console.log("Playground not available in this environment");
-      }
-    }
-
   },
-})
+});
