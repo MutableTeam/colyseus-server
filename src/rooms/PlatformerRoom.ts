@@ -453,8 +453,8 @@ export class PlatformerRoom extends Room<PlatformerState> {
       const enemy = this.state.enemies[i]
 
       // Simple circle collision
-      const dx = enemy.position.x - player.position.x
-      const dy = enemy.position.y - player.position.y
+      const dx = player.position.x - enemy.position.x
+      const dy = player.position.y - enemy.position.y
       const distance = Math.sqrt(dx * dx + dy * dy)
 
       if (distance < playerRadius + enemy.radius) {
