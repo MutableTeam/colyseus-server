@@ -706,7 +706,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
 
     // Calculate final scores and rankings
     const playerResults = Array.from(this.state.players.entries())
-      .map(([id, player]: [string, PlatformerPlayer]) => ({
+      .map(([id, player]) => ({
         id: id,
         name: player.name,
         score: player.score,

@@ -682,7 +682,7 @@ export class BattleRoom extends Room<BattleState> {
       reason: reason,
       winnerId: winnerId,
       gameTime: this.state.gameTime,
-      playerStats: Array.from(this.state.players.entries()).map(([id, player]: [string, Player]) => ({
+      playerStats: Array.from(this.state.players.entries()).map(([id, player]) => ({
         id: id,
         name: player.name,
         kills: player.kills,

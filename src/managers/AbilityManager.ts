@@ -1,4 +1,4 @@
-import type { Room } from "colyseus"
+import type { Room } from "@colyseus/core"
 import type { Player } from "../schemas/Player"
 import { Vector3D } from "../schemas/Vector3D"
 import { Projectile } from "../schemas/Projectile"
@@ -22,12 +22,12 @@ export class AbilityManager {
   }
 
   useAbility(room: Room, player: Player, abilityId: string, targetPosition: Vector3D | null): boolean {
+    let success = false
+
     // Check if player can use ability (cooldown)
     if (!player.canUseAbility(abilityId)) {
       return false
     }
-
-    let success = false
 
     switch (abilityId) {
       case "charge":
@@ -148,7 +148,7 @@ export class AbilityManager {
     const knockbackForce = 15
     const damage = 20
 
-    room.state.players.forEach((otherPlayer) => {
+    room.state.players.forEach((otherPlayer: Player) => {
       // Skip self
       if (otherPlayer.id === player.id) return
 
@@ -440,7 +440,7 @@ export class AbilityManager {
       let closestPlayer: Player | null = null
       let closestDistance = 5 // Maximum heal range
 
-      room.state.players.forEach((otherPlayer) => {
+      room.state.players.forEach((otherPlayer: Player) => {
         const dx = otherPlayer.position.x - targetPosition.x
         const dy = otherPlayer.position.y - targetPosition.y
         const dz = otherPlayer.position.z - targetPosition.z

@@ -167,12 +167,6 @@ export class RaceRoom extends Room<RaceState> {
       this.state.checkpoints.forEach((checkpoint: Checkpoint) => {
         if (!player.checkpoints.includes(checkpoint.id) && player.position >= checkpoint.position) {
           player.checkpoints.push(checkpoint.id)
-
-          // Broadcast checkpoint reached
-          this.broadcast("checkpoint_reached", {
-            playerId: player.id,
-            checkpointId: checkpoint.id,
-          })
         }
       })
 
@@ -279,7 +273,7 @@ export class RaceRoom extends Room<RaceState> {
       reason: reason,
       raceTime: this.state.raceTime,
       playerResults: Array.from(this.state.players.entries())
-        .map(([id, player]: [string, RacePlayer]) => ({
+        .map(([id, player]) => ({
           id: id,
           name: player.name,
           finished: player.finished,
