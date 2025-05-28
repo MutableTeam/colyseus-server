@@ -715,7 +715,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
           lives: player.lives,
         }
       })
-      .sort((a: any, b: any) => b.score - a.score)
+      .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
 
     // Broadcast game end
     this.broadcast("game_ended", {

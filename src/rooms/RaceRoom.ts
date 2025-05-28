@@ -283,7 +283,7 @@ export class RaceRoom extends Room<RaceState> {
             position: player.finishPosition,
           }
         })
-        .sort((a: any, b: any) => {
+        .sort((a: { finished: boolean; position: number }, b: { finished: boolean; position: number }) => {
           // Sort by position (finished players first)
           if (a.finished && !b.finished) return -1
           if (!a.finished && b.finished) return 1

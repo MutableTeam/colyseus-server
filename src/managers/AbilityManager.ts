@@ -30,6 +30,58 @@ export class AbilityManager {
       return false
     }
 
+    // Set animation state based on ability
+    switch (abilityId) {
+      case "charge":
+        player.animationState = "charging"
+        break
+      case "shockwave":
+        player.animationState = "shockwave"
+        break
+      case "berserk":
+        player.animationState = "berserk"
+        break
+      case "fireball":
+        player.animationState = "casting"
+        break
+      case "teleport":
+        player.animationState = "teleporting"
+        break
+      case "frostNova":
+        player.animationState = "frostNova"
+        break
+      case "multishot":
+        player.animationState = "shooting"
+        break
+      case "trap":
+        player.animationState = "placing"
+        break
+      case "rapidFire":
+        player.animationState = "rapidFire"
+        break
+      case "stealth":
+        player.animationState = "stealth"
+        break
+      case "smokeBomb":
+        player.animationState = "smokeBomb"
+        break
+      case "backstab":
+        player.animationState = "backstab"
+        break
+      case "heal":
+        player.animationState = "healing"
+        break
+      case "shield":
+        player.animationState = "shielding"
+        break
+      case "revive":
+        player.animationState = "reviving"
+        break
+      default:
+        // No ability or basic attack
+        return false
+    }
+
     switch (abilityId) {
       case "charge":
         success = this.useChargeAbility(room, player, targetPosition)
@@ -132,9 +184,6 @@ export class AbilityManager {
     player.velocity.x = direction.x * chargeSpeed
     player.velocity.z = direction.z * chargeSpeed
 
-    // Set animation state
-    player.animationState = "charging"
-
     return true
   }
 
@@ -185,9 +234,6 @@ export class AbilityManager {
       }
     })
 
-    // Set animation state
-    player.animationState = "shockwave"
-
     return true
   }
 
@@ -197,9 +243,6 @@ export class AbilityManager {
     // Increase player's damage and speed temporarily
     // This would be implemented with a buff system
     // For now, we'll just broadcast it and let the client handle visual effects
-
-    // Set animation state
-    player.animationState = "berserk"
 
     return true
   }
@@ -253,9 +296,6 @@ export class AbilityManager {
     // Add projectile to game state
     room.state.projectiles.set(projectile.id, projectile)
 
-    // Set animation state
-    player.animationState = "casting"
-
     return true
   }
 
@@ -271,9 +311,6 @@ export class AbilityManager {
     if (!this.isValidPosition(targetPosition, room.state.mapWidth, room.state.mapLength, room.state.mapHeight)) {
       return false
     }
-
-    // Set animation state before teleport
-    player.animationState = "teleporting"
 
     // Teleport player to target position
     player.position.x = targetPosition.x
@@ -293,9 +330,6 @@ export class AbilityManager {
 
     // Similar to shockwave but with freezing effect
     // For now, we'll just broadcast it and let the client handle visual effects
-
-    // Set animation state
-    player.animationState = "frostNova"
 
     return true
   }
@@ -364,9 +398,6 @@ export class AbilityManager {
       room.state.projectiles.set(projectile.id, projectile)
     }
 
-    // Set animation state
-    player.animationState = "shooting"
-
     return true
   }
 
@@ -375,9 +406,6 @@ export class AbilityManager {
 
     // In a full implementation, you would create a trap object in the game state
     // For now, we'll just broadcast it and let the client handle visual effects
-
-    // Set animation state
-    player.animationState = "placing"
 
     return true
   }
@@ -388,9 +416,6 @@ export class AbilityManager {
     // In a full implementation, this would modify the player's attack speed
     // For now, we'll just broadcast it and let the client handle visual effects
 
-    // Set animation state
-    player.animationState = "rapidFire"
-
     return true
   }
 
@@ -399,9 +424,6 @@ export class AbilityManager {
 
     // In a full implementation, this would make the player invisible
     // For now, we'll just broadcast it and let the client handle visual effects
-
-    // Set animation state
-    player.animationState = "stealth"
 
     return true
   }
@@ -412,9 +434,6 @@ export class AbilityManager {
     // In a full implementation, this would create a smoke effect
     // For now, we'll just broadcast it and let the client handle visual effects
 
-    // Set animation state
-    player.animationState = "smokeBomb"
-
     return true
   }
 
@@ -423,9 +442,6 @@ export class AbilityManager {
 
     // In a full implementation, this would teleport behind a target and attack
     // For now, we'll just broadcast it and let the client handle visual effects
-
-    // Set animation state
-    player.animationState = "backstab"
 
     return true
   }
@@ -441,7 +457,7 @@ export class AbilityManager {
       let closestPlayer: Player | null = null
       let closestDistance = 5 // Maximum heal range
 
-      room.state.players.forEach((otherPlayer: Player) => {
+      room.state.players.forEach((otherPlayer: Player, playerId: string) => {
         const dx = otherPlayer.position.x - targetPosition.x
         const dy = otherPlayer.position.y - targetPosition.y
         const dz = otherPlayer.position.z - targetPosition.z
@@ -453,7 +469,7 @@ export class AbilityManager {
         }
       })
 
-      if (closestPlayer) {
+      if (closestPlayer && closestPlayer.health !== undefined && closestPlayer.maxHealth !== undefined) {
         // Heal target
         closestPlayer.health = Math.min(closestPlayer.maxHealth, closestPlayer.health + healAmount)
 
@@ -476,9 +492,6 @@ export class AbilityManager {
       })
     }
 
-    // Set animation state
-    player.animationState = "healing"
-
     return true
   }
 
@@ -488,9 +501,6 @@ export class AbilityManager {
     // In a full implementation, this would create a shield effect
     // For now, we'll just broadcast it and let the client handle visual effects
 
-    // Set animation state
-    player.animationState = "shielding"
-
     return true
   }
 
@@ -499,9 +509,6 @@ export class AbilityManager {
 
     // In a full implementation, this would revive a dead player
     // For now, we'll just broadcast it and let the client handle visual effects
-
-    // Set animation state
-    player.animationState = "reviving"
 
     return true
   }
