@@ -2,7 +2,7 @@ import { Schema, type } from "@colyseus/schema"
 import { Vector2D } from "./Vector2D"
 
 export class Enemy extends Schema {
-  @type("string") id: string
+  @type("string") id = ""
   @type(Vector2D) position = new Vector2D()
   @type("string") type = "walking" // walking, flying, etc.
 

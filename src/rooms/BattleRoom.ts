@@ -1,4 +1,4 @@
-import { Room, type Client } from "colyseus"
+import { Room, type Client } from "@colyseus/core"
 import { BattleState, MapObject } from "../schemas/BattleState"
 import { Player } from "../schemas/Player"
 import { Projectile } from "../schemas/Projectile"
@@ -15,8 +15,8 @@ export class BattleRoom extends Room<BattleState> {
   private mapHeight = 50
   private gravity = 9.8
   private tickRate = 60 // 60 updates per second for smooth Three.js rendering
-  private abilityManager: AbilityManager
-  private collisionManager: CollisionManager
+  private abilityManager: AbilityManager = new AbilityManager()
+  private collisionManager: CollisionManager = new CollisionManager()
 
   onCreate(options: any) {
     console.log("BattleRoom created!", options)
@@ -28,7 +28,7 @@ export class BattleRoom extends Room<BattleState> {
     this.gravity = options.gravity || this.gravity
 
     // Initialize the room state
-    this.state = new BattleState(this.mapWidth, this.mapLength, this.mapHeight)
+    this.setState(new BattleState(this.mapWidth, this.mapLength, this.mapHeight))
     this.state.gravity = this.gravity
 
     // Set game mode
@@ -38,18 +38,14 @@ export class BattleRoom extends Room<BattleState> {
     this.state.timeOfDay = options.timeOfDay || "day"
     this.state.weather = options.weather || "clear"
 
-    // Initialize managers
-    this.abilityManager = new AbilityManager()
-    this.collisionManager = new CollisionManager()
-
     // Load map objects
     this.loadMapObjects(options.mapId || "default")
 
     // Set up physics simulation
-    this.setSimulationInterval((deltaTime) => this.update(deltaTime), 1000 / this.tickRate)
+    this.setSimulationInterval((deltaTime: number) => this.update(deltaTime), 1000 / this.tickRate)
 
     // Handle player movement
-    this.onMessage("move", (client, message) => {
+    this.onMessage("move", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
@@ -75,7 +71,7 @@ export class BattleRoom extends Room<BattleState> {
     })
 
     // Handle player jumping
-    this.onMessage("jump", (client) => {
+    this.onMessage("jump", (client: Client) => {
       const player = this.state.players.get(client.sessionId)
       if (!player || !player.isGrounded) return
 
@@ -85,7 +81,7 @@ export class BattleRoom extends Room<BattleState> {
     })
 
     // Handle player shooting
-    this.onMessage("shoot", (client, message) => {
+    this.onMessage("shoot", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
@@ -103,7 +99,7 @@ export class BattleRoom extends Room<BattleState> {
     })
 
     // Handle player using abilities
-    this.onMessage("use_ability", (client, message) => {
+    this.onMessage("use_ability", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
@@ -121,7 +117,7 @@ export class BattleRoom extends Room<BattleState> {
     })
 
     // Handle player changing character
-    this.onMessage("change_character", (client, message) => {
+    this.onMessage("change_character", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player || this.state.gameStarted) return // Can't change after game starts
 
@@ -138,7 +134,7 @@ export class BattleRoom extends Room<BattleState> {
     })
 
     // Handle ready state
-    this.onMessage("ready", (client, message) => {
+    this.onMessage("ready", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
@@ -212,7 +208,7 @@ export class BattleRoom extends Room<BattleState> {
     if (!this.state.gameStarted) return
 
     // Update player positions
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player: Player) => {
       // Skip dead players
       if (player.health <= 0) {
         if (!player.isRespawning) {
@@ -293,7 +289,7 @@ export class BattleRoom extends Room<BattleState> {
       }
 
       // Check collisions with map objects
-      this.state.mapObjects.forEach((mapObject) => {
+      this.state.mapObjects.forEach((mapObject: MapObject) => {
         if (this.collisionManager.checkPlayerMapObjectCollision(player, mapObject)) {
           this.collisionManager.resolveCollision(player, mapObject)
         }
@@ -311,7 +307,7 @@ export class BattleRoom extends Room<BattleState> {
     })
 
     // Update projectiles
-    this.state.projectiles.forEach((projectile) => {
+    this.state.projectiles.forEach((projectile: Projectile) => {
       // Apply gravity if projectile is affected by it
       if (projectile.gravity > 0) {
         projectile.velocity.y -= projectile.gravity * dt
@@ -375,7 +371,7 @@ export class BattleRoom extends Room<BattleState> {
       }
 
       // Check collisions with players
-      this.state.players.forEach((player) => {
+      this.state.players.forEach((player: Player) => {
         // Skip if it's the player who shot the projectile or if player is dead
         if (player.id === projectile.ownerId || player.health <= 0 || player.isRespawning) return
 
@@ -622,7 +618,7 @@ export class BattleRoom extends Room<BattleState> {
     this.state.gameStartTime = Date.now()
 
     // Reset player positions to spawn points
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player: Player) => {
       const spawnPoint = this.getRandomSpawnPoint()
       player.position.x = spawnPoint.x
       player.position.y = spawnPoint.y
@@ -652,7 +648,7 @@ export class BattleRoom extends Room<BattleState> {
     let alivePlayers = 0
     let lastAlivePlayerId = ""
 
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player: Player) => {
       if (player.health > 0) {
         alivePlayers++
         lastAlivePlayerId = player.id
@@ -673,7 +669,7 @@ export class BattleRoom extends Room<BattleState> {
     if (!winnerId) {
       let maxKills = -1
 
-      this.state.players.forEach((player) => {
+      this.state.players.forEach((player: Player) => {
         if (player.kills > maxKills) {
           maxKills = player.kills
           winnerId = player.id
@@ -686,7 +682,7 @@ export class BattleRoom extends Room<BattleState> {
       reason: reason,
       winnerId: winnerId,
       gameTime: this.state.gameTime,
-      playerStats: Array.from(this.state.players.entries()).map(([id, player]) => ({
+      playerStats: Array.from(this.state.players.entries()).map(([id, player]: [string, Player]) => ({
         id: id,
         name: player.name,
         kills: player.kills,

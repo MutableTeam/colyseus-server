@@ -1,4 +1,4 @@
-import { Room, type Client } from "colyseus"
+import { Room, type Client } from "@colyseus/core"
 import { PlatformerState } from "../schemas/PlatformerState"
 import { PlatformerPlayer } from "../schemas/PlatformerPlayer"
 import { Platform } from "../schemas/Platform"
@@ -23,16 +23,16 @@ export class PlatformerRoom extends Room<PlatformerState> {
     this.gravity = options.gravity || this.gravity
 
     // Initialize the room state
-    this.state = new PlatformerState(this.levelWidth, this.levelHeight)
+    this.setState(new PlatformerState(this.levelWidth, this.levelHeight))
 
     // Load level data (platforms, collectibles, enemies)
     this.loadLevel(options.levelId || "level1")
 
     // Set up physics simulation
-    this.setSimulationInterval((deltaTime) => this.update(deltaTime), 1000 / this.tickRate)
+    this.setSimulationInterval((deltaTime: number) => this.update(deltaTime), 1000 / this.tickRate)
 
     // Handle player movement
-    this.onMessage("move", (client, message) => {
+    this.onMessage("move", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
@@ -41,7 +41,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     })
 
     // Handle player jumping
-    this.onMessage("jump", (client) => {
+    this.onMessage("jump", (client: Client) => {
       const player = this.state.players.get(client.sessionId)
       if (!player || !player.canJump) return
 
@@ -50,7 +50,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     })
 
     // Handle player attacking
-    this.onMessage("attack", (client) => {
+    this.onMessage("attack", (client: Client) => {
       const player = this.state.players.get(client.sessionId)
       if (!player || player.attackCooldown > 0) return
 
@@ -68,7 +68,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     })
 
     // Handle player using special ability
-    this.onMessage("use_ability", (client, message) => {
+    this.onMessage("use_ability", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player || player.abilityCooldown > 0) return
 
@@ -80,7 +80,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     })
 
     // Handle ready state
-    this.onMessage("ready", (client, message) => {
+    this.onMessage("ready", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
@@ -123,7 +123,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     client.send("level_data", {
       width: this.levelWidth,
       height: this.levelHeight,
-      platforms: this.state.platforms.map((p) => ({
+      platforms: this.state.platforms.map((p: Platform) => ({
         id: p.id,
         x: p.position.x,
         y: p.position.y,
@@ -131,14 +131,14 @@ export class PlatformerRoom extends Room<PlatformerState> {
         height: p.height,
         type: p.type,
       })),
-      collectibles: this.state.collectibles.map((c) => ({
+      collectibles: this.state.collectibles.map((c: Collectible) => ({
         id: c.id,
         x: c.position.x,
         y: c.position.y,
         type: c.type,
         value: c.value,
       })),
-      enemies: this.state.enemies.map((e) => ({
+      enemies: this.state.enemies.map((e: Enemy) => ({
         id: e.id,
         x: e.position.x,
         y: e.position.y,
@@ -267,7 +267,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     if (!this.state.gameStarted) return
 
     // Update players
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player: PlatformerPlayer) => {
       // Apply gravity
       player.velocity.y += this.gravity * dt
 
@@ -283,7 +283,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
 
       // Check platform collisions
       let onGround = false
-      this.state.platforms.forEach((platform) => {
+      this.state.platforms.forEach((platform: Platform) => {
         if (this.checkPlatformCollision(player, platform)) {
           onGround = true
         }
@@ -322,7 +322,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     })
 
     // Update enemies
-    this.state.enemies.forEach((enemy) => {
+    this.state.enemies.forEach((enemy: Enemy) => {
       // Simple AI movement
       if (enemy.type === "walking") {
         enemy.position.x += enemy.direction * enemy.speed * dt
@@ -334,7 +334,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
 
         // Check platform edges
         let onPlatform = false
-        this.state.platforms.forEach((platform) => {
+        this.state.platforms.forEach((platform: Platform) => {
           if (
             enemy.position.x >= platform.position.x - platform.width / 2 &&
             enemy.position.x <= platform.position.x + platform.width / 2 &&
@@ -528,7 +528,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     switch (player.characterType) {
       case "knight":
         // Shield bash - pushes enemies away
-        this.state.enemies.forEach((enemy) => {
+        this.state.enemies.forEach((enemy: Enemy) => {
           const dx = enemy.position.x - player.position.x
           const dy = enemy.position.y - player.position.y
           const distance = Math.sqrt(dx * dx + dy * dy)
@@ -550,7 +550,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
       case "mage":
         // Fireball - damages enemies in an area
         if (targetPosition) {
-          this.state.enemies.forEach((enemy) => {
+          this.state.enemies.forEach((enemy: Enemy) => {
             const dx = enemy.position.x - targetPosition.x
             const dy = enemy.position.y - targetPosition.y
             const distance = Math.sqrt(dx * dx + dy * dy)
@@ -637,7 +637,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
 
       // Check if all players are game over
       let allGameOver = true
-      this.state.players.forEach((p) => {
+      this.state.players.forEach((p: PlatformerPlayer) => {
         if (!p.gameOver) {
           allGameOver = false
         }
@@ -678,7 +678,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
     // Check if all players are ready
     let allReady = true
 
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player: PlatformerPlayer) => {
       if (!player.ready) {
         allReady = false
       }
@@ -706,7 +706,7 @@ export class PlatformerRoom extends Room<PlatformerState> {
 
     // Calculate final scores and rankings
     const playerResults = Array.from(this.state.players.entries())
-      .map(([id, player]) => ({
+      .map(([id, player]: [string, PlatformerPlayer]) => ({
         id: id,
         name: player.name,
         score: player.score,

@@ -1,17 +1,6 @@
 import { Schema, MapSchema, type } from "@colyseus/schema"
 import { Player } from "./Player"
-
-export class GameListing extends Schema {
-  @type("string") id: string
-  @type("string") type: string
-  @type("string") name: string
-  @type("number") maxPlayers: number
-  @type("number") currentPlayers = 0
-  @type("string") creatorId: string
-  @type("number") createdAt: number = Date.now()
-  @type("boolean") locked = false
-  @type({ map: "string" }) playerIds = new MapSchema<string>()
-}
+import { GameListing } from "./GameListing"
 
 export class LobbyState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>()

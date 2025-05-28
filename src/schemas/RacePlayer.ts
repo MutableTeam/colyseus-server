@@ -1,8 +1,8 @@
 import { Schema, type } from "@colyseus/schema"
 
 export class RacePlayer extends Schema {
-  @type("string") id: string
-  @type("string") name: string
+  @type("string") id = ""
+  @type("string") name = ""
   @type("string") vehicleType = "default"
 
   @type("number") position = 0 // Distance along the track

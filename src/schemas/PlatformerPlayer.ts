@@ -2,8 +2,8 @@ import { Schema, type } from "@colyseus/schema"
 import { Vector2D } from "./Vector2D"
 
 export class PlatformerPlayer extends Schema {
-  @type("string") id: string
-  @type("string") name: string
+  @type("string") id = ""
+  @type("string") name = ""
   @type("string") characterType = "default"
 
   @type(Vector2D) position = new Vector2D()

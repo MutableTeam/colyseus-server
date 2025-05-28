@@ -3,8 +3,8 @@ import { Vector3D } from "./Vector3D"
 import { Quaternion } from "./Quaternion"
 
 export class Projectile extends Schema {
-  @type("string") id: string
-  @type("string") ownerId: string
+  @type("string") id = ""
+  @type("string") ownerId = ""
   @type("string") type = "default"
 
   // 3D position and movement

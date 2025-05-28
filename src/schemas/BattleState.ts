@@ -5,8 +5,8 @@ import { Vector3D } from "./Vector3D"
 
 // Define map objects for Three.js environment
 export class MapObject extends Schema {
-  @type("string") id: string
-  @type("string") type: string // Type of object (wall, platform, etc.)
+  @type("string") id = ""
+  @type("string") type = "" // Type of object (wall, platform, etc.)
   @type(Vector3D) position = new Vector3D()
   @type(Vector3D) scale = new Vector3D(1, 1, 1)
   @type("number") rotation = 0 // Simple Y-axis rotation for static objects

@@ -3,8 +3,8 @@ import { Vector3D } from "./Vector3D"
 import { Quaternion } from "./Quaternion"
 
 export class Player extends Schema {
-  @type("string") id: string
-  @type("string") name: string
+  @type("string") id = ""
+  @type("string") name = ""
   @type("string") characterType = "default"
   @type("string") modelType = "default" // For different 3D models
 
@@ -45,7 +45,7 @@ export class Player extends Schema {
   }
 
   canUseAbility(abilityId: string): boolean {
-    return !this.abilityCooldowns.has(abilityId) || this.abilityCooldowns.get(abilityId) <= 0
+    return !this.abilityCooldowns.has(abilityId) || (this.abilityCooldowns.get(abilityId) || 0) <= 0
   }
 
   setAbilityCooldown(abilityId: string, cooldown = 5000) {

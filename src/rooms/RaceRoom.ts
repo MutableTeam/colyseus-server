@@ -1,13 +1,10 @@
-import { Room, type Client } from "colyseus"
+import { Room, type Client } from "@colyseus/core"
 import { RaceState } from "../schemas/RaceState"
 import { RacePlayer } from "../schemas/RacePlayer"
 import { Checkpoint } from "../schemas/Checkpoint"
 
 export class RaceRoom extends Room<RaceState> {
   maxClients = 8
-
-  // Initialize the room state
-  state = new RaceState()
 
   // Race settings
   private trackLength = 5000 // Length of the race track
@@ -18,6 +15,9 @@ export class RaceRoom extends Room<RaceState> {
   onCreate(options: any) {
     console.log("RaceRoom created!", options)
 
+    // Initialize the room state
+    this.setState(new RaceState())
+
     // Set track settings from options or use defaults
     this.trackLength = options.trackLength || this.trackLength
     this.numCheckpoints = options.numCheckpoints || this.numCheckpoints
@@ -26,10 +26,10 @@ export class RaceRoom extends Room<RaceState> {
     this.createCheckpoints()
 
     // Set up physics simulation
-    this.setSimulationInterval((deltaTime) => this.update(deltaTime), 1000 / this.tickRate)
+    this.setSimulationInterval((deltaTime: number) => this.update(deltaTime), 1000 / this.tickRate)
 
     // Handle player movement
-    this.onMessage("move", (client, message) => {
+    this.onMessage("move", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
@@ -39,7 +39,7 @@ export class RaceRoom extends Room<RaceState> {
     })
 
     // Handle player using boost
-    this.onMessage("use_boost", (client) => {
+    this.onMessage("use_boost", (client: Client) => {
       const player = this.state.players.get(client.sessionId)
       if (!player || !player.canUseBoost()) return
 
@@ -47,7 +47,7 @@ export class RaceRoom extends Room<RaceState> {
     })
 
     // Handle ready state
-    this.onMessage("ready", (client, message) => {
+    this.onMessage("ready", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
       if (!player) return
 
@@ -142,7 +142,7 @@ export class RaceRoom extends Room<RaceState> {
     if (!this.state.raceStarted || this.state.raceEnded) return
 
     // Update player positions
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player: RacePlayer) => {
       // Skip finished players
       if (player.finished) return
 
@@ -164,7 +164,7 @@ export class RaceRoom extends Room<RaceState> {
       player.position += player.speed * dt
 
       // Check for checkpoint crossings
-      this.state.checkpoints.forEach((checkpoint) => {
+      this.state.checkpoints.forEach((checkpoint: Checkpoint) => {
         if (!player.checkpoints.includes(checkpoint.id) && player.position >= checkpoint.position) {
           player.checkpoints.push(checkpoint.id)
 
@@ -228,7 +228,7 @@ export class RaceRoom extends Room<RaceState> {
     let allReady = true
     let playerCount = 0
 
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player: RacePlayer) => {
       playerCount++
       if (!player.ready) {
         allReady = false
@@ -258,7 +258,7 @@ export class RaceRoom extends Room<RaceState> {
     // Count players who haven't finished
     let unfinishedPlayers = 0
 
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player: RacePlayer) => {
       if (!player.finished) {
         unfinishedPlayers++
       }
@@ -279,7 +279,7 @@ export class RaceRoom extends Room<RaceState> {
       reason: reason,
       raceTime: this.state.raceTime,
       playerResults: Array.from(this.state.players.entries())
-        .map(([id, player]) => ({
+        .map(([id, player]: [string, RacePlayer]) => ({
           id: id,
           name: player.name,
           finished: player.finished,

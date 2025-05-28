@@ -3,13 +3,15 @@ import { LobbyState } from "../schemas/LobbyState"
 
 export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
-  state = new LobbyState()
 
   onCreate(options: any) {
     console.log("LobbyRoom created!", options)
 
+    // Initialize the room state
+    this.setState(new LobbyState())
+
     // Handle player joining a game
-    this.onMessage("join_game", (client, message) => {
+    this.onMessage("join_game", (client: Client, message: any) => {
       const { gameId, gameType } = message
       console.log(`Player ${client.sessionId} requesting to join game ${gameId} of type ${gameType}`)
 
@@ -18,7 +20,7 @@ export class LobbyRoom extends Room<LobbyState> {
     })
 
     // Handle player creating a game
-    this.onMessage("create_game", (client, message) => {
+    this.onMessage("create_game", (client: Client, message: any) => {
       const { gameType, gameName, maxPlayers } = message
       console.log(`Player ${client.sessionId} creating a game of type ${gameType}`)
 
@@ -36,7 +38,7 @@ export class LobbyRoom extends Room<LobbyState> {
     })
 
     // Handle player leaving a game
-    this.onMessage("leave_game", (client, message) => {
+    this.onMessage("leave_game", (client: Client, message: any) => {
       const { gameId } = message
       this.state.removePlayerFromGame(gameId, client.sessionId)
 
@@ -48,7 +50,7 @@ export class LobbyRoom extends Room<LobbyState> {
     })
 
     // Handle request for active lobbies by game type
-    this.onMessage("get_active_lobbies", (client, message) => {
+    this.onMessage("get_active_lobbies", (client: Client, message: any) => {
       const { gameType } = message
 
       let activeLobbies
