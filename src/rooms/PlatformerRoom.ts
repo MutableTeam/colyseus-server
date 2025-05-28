@@ -4,7 +4,6 @@ import { PlatformerPlayer } from "../schemas/PlatformerPlayer"
 import { Platform } from "../schemas/Platform"
 import { Collectible } from "../schemas/Collectible"
 import { Enemy } from "../schemas/Enemy"
-import { StateView } from "@colyseus/schema"
 
 export class PlatformerRoom extends Room<PlatformerState> {
   maxClients = 4
@@ -108,10 +107,6 @@ export class PlatformerRoom extends Room<PlatformerState> {
 
     // Set abilities and stats based on character type
     this.setPlayerCharacteristics(player)
-
-    // Create a StateView for this client
-    client.view = new StateView()
-    client.view.add(player)
 
     // Add player to the game state
     this.state.players.set(client.sessionId, player)
