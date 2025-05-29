@@ -87,64 +87,36 @@ export class HubRoom extends Room<HubState> {
 
   async discoverAvailableLobbies() {
     try {
-      // Get all active rooms from the presence system
       const activeRooms: any[] = []
 
-      // Try to get room listings from the server's presence system
-      if (this.presence) {
-        try {
-          // Get all rooms from presence
-          const roomListings = await this.presence.hgetall("rooms")
+      // Access the matchMaker through the server instance
+      const matchMaker = this.matchMaker
+      console.log("🔍 Hub: matchMaker exists:", !!matchMaker)
 
-          for (const [roomId, roomDataStr] of Object.entries(roomListings)) {
-            try {
-              const roomData = JSON.parse(roomDataStr as string)
+      if (matchMaker && matchMaker.rooms) {
+        console.log("🔍 Hub: Total rooms in matchMaker:", matchMaker.rooms.size)
 
-              // Only include lobby rooms that are joinable
-              if (roomData.name === "lobby" && !roomData.locked && roomData.clients < roomData.maxClients) {
-                activeRooms.push({
-                  id: roomId,
-                  name: `Lobby ${roomId.substring(0, 8)}`,
-                  type: "lobby",
-                  currentPlayers: roomData.clients || 0,
-                  maxPlayers: roomData.maxClients || 50,
-                  createdAt: roomData.createdAt ? new Date(roomData.createdAt).getTime() : Date.now(),
-                  locked: roomData.locked || false,
-                  private: roomData.private || false,
-                })
-              }
-            } catch (parseError) {
-              console.log(`Failed to parse room data for ${roomId}:`, parseError)
-            }
+        for (const [roomId, room] of matchMaker.rooms) {
+          console.log(`🔍 Hub: Checking room ${roomId}:`, {
+            roomName: room.roomName,
+            clients: room.clients.size,
+            maxClients: room.maxClients,
+            locked: room.locked,
+          })
+
+          // Only include lobby rooms that are joinable
+          if (room.roomName === "lobby" && !room.locked && room.clients.size < room.maxClients) {
+            activeRooms.push({
+              id: roomId,
+              name: `Lobby ${roomId.substring(0, 8)}`,
+              type: "lobby",
+              currentPlayers: room.clients.size || 0,
+              maxPlayers: room.maxClients || 50,
+              createdAt: room.createdAt ? new Date(room.createdAt).getTime() : Date.now(),
+              locked: room.locked || false,
+              private: room.private || false,
+            })
           }
-        } catch (presenceError) {
-          console.log("Presence system not available, trying alternative method:", presenceError)
-        }
-      }
-
-      // Alternative method: Check if we can access the server's room registry
-      if (activeRooms.length === 0) {
-        try {
-          // Access the server's matchmaker if available
-          const matchMaker = (this as any).matchMaker || (this as any).server?.matchMaker
-          if (matchMaker && matchMaker.rooms) {
-            for (const [roomId, room] of matchMaker.rooms) {
-              if (room.roomName === "lobby" && !room.locked && room.clients.size < room.maxClients) {
-                activeRooms.push({
-                  id: roomId,
-                  name: `Lobby ${roomId.substring(0, 8)}`,
-                  type: "lobby",
-                  currentPlayers: room.clients.size,
-                  maxPlayers: room.maxClients,
-                  createdAt: Date.now(),
-                  locked: room.locked || false,
-                  private: false,
-                })
-              }
-            }
-          }
-        } catch (matchMakerError) {
-          console.log("MatchMaker access failed:", matchMakerError)
         }
       }
 
