@@ -1,77 +1,158 @@
-import { Schema, MapSchema, type } from "@colyseus/schema"
-import { Player } from "./Player"
-import { GameListing } from "./GameListing"
+import { Room, type Client } from "@colyseus/core"
+import { HubState } from "../schemas/HubState"
 
-export class HubState extends Schema {
-  @type({ map: Player }) players = new MapSchema<Player>()
-  @type({ map: GameListing }) availableLobbies = new MapSchema<GameListing>()
-  @type("number") totalPlayers = 0
-  @type("string") serverStatus = "online"
-  @type("number") lastUpdated = Date.now()
+export class HubRoom extends Room<HubState> {
+  maxClients = 200 // Higher capacity for the main hub
+  private lobbyUpdateInterval: any
 
-  addPlayer(id: string, name: string) {
-    const player = new Player()
-    player.id = id
-    player.name = name
-    this.players.set(id, player)
-    this.totalPlayers = this.players.size
-    this.lastUpdated = Date.now()
-    return player
-  }
+  onCreate(options: any) {
+    console.log("🏠 HubRoom created - Central hub is now online!", options)
 
-  removePlayer(id: string) {
-    if (this.players.has(id)) {
-      this.players.delete(id)
-      this.totalPlayers = this.players.size
-      this.lastUpdated = Date.now()
-      return true
-    }
-    return false
-  }
+    // Initialize the hub state
+    this.setState(new HubState())
+    this.state.serverStatus = "online"
 
-  updateAvailableLobbies(lobbies: GameListing[]) {
-    // Clear existing lobbies
-    this.availableLobbies.clear()
+    // Handle request for available lobbies
+    this.onMessage("get_lobbies", (client: Client, message: any) => {
+      console.log(`🔍 Player ${client.sessionId} requesting lobbies:`, message)
 
-    // Add new lobbies
-    lobbies.forEach((lobby) => {
-      this.availableLobbies.set(lobby.id, lobby)
-    })
+      const { gameType } = message
 
-    this.lastUpdated = Date.now()
-  }
-
-  addLobby(lobby: GameListing) {
-    this.availableLobbies.set(lobby.id, lobby)
-    this.lastUpdated = Date.now()
-  }
-
-  removeLobby(lobbyId: string) {
-    if (this.availableLobbies.has(lobbyId)) {
-      this.availableLobbies.delete(lobbyId)
-      this.lastUpdated = Date.now()
-      return true
-    }
-    return false
-  }
-
-  getLobbiesByType(gameType: string) {
-    const lobbies: GameListing[] = []
-    this.availableLobbies.forEach((lobby) => {
-      if (lobby.type === gameType && !lobby.locked && lobby.currentPlayers < lobby.maxPlayers) {
-        lobbies.push(lobby)
+      let lobbies
+      if (gameType) {
+        lobbies = this.state.getLobbiesByType(gameType)
+        console.log(`Found ${lobbies.length} ${gameType} lobbies`)
+      } else {
+        lobbies = this.state.getAllAvailableLobbies()
+        console.log(`Found ${lobbies.length} total lobbies`)
       }
+
+      client.send("lobbies_update", {
+        lobbies: lobbies,
+        gameType: gameType || "all",
+        timestamp: Date.now(),
+      })
     })
-    return lobbies.sort((a, b) => b.createdAt - a.createdAt)
+
+    // Handle navigation to specific lobby
+    this.onMessage("join_lobby", (client: Client, message: any) => {
+      const { lobbyId, gameType } = message
+      console.log(`🎯 Player ${client.sessionId} wants to join lobby ${lobbyId} (${gameType})`)
+
+      // Send navigation info to client
+      client.send("navigate_to_lobby", {
+        lobbyId,
+        gameType,
+        action: "join_lobby",
+        timestamp: Date.now(),
+      })
+    })
+
+    // Handle creating new lobby
+    this.onMessage("create_lobby", (client: Client, message: any) => {
+      const { gameType, lobbyName, maxPlayers } = message
+      console.log(`🎮 Player ${client.sessionId} wants to create ${gameType} lobby: ${lobbyName}`)
+
+      // Send navigation info to client
+      client.send("navigate_to_lobby", {
+        gameType,
+        lobbyName,
+        maxPlayers,
+        action: "create_lobby",
+        timestamp: Date.now(),
+      })
+    })
+
+    // Handle test message
+    this.onMessage("test_message", (client: Client, message: any) => {
+      console.log(`🧪 Test message from ${client.sessionId}:`, message)
+      client.send("test_response", {
+        message: "Hub received your message!",
+        timestamp: Date.now(),
+        clientId: client.sessionId,
+        hubStatus: this.state.serverStatus,
+      })
+    })
+
+    // Set up periodic lobby discovery from other rooms
+    this.lobbyUpdateInterval = this.setSimulationInterval(() => {
+      this.discoverAvailableLobbies()
+    }, 10000) // Update every 10 seconds
+
+    // Initial lobby discovery
+    this.discoverAvailableLobbies()
+
+    console.log("🌟 Hub room fully initialized and ready for players!")
   }
 
-  getAllAvailableLobbies() {
-    const lobbies: GameListing[] = []
-    this.availableLobbies.forEach((lobby) => {
-      if (!lobby.locked && lobby.currentPlayers < lobby.maxPlayers) {
-        lobbies.push(lobby)
-      }
-    })
-    return lobbies.sort((a, b) => b.createdAt - a.createdAt)
+  async discoverAvailableLobbies() {
+    try {
+      // This will be implemented to discover lobbies from other rooms
+      // For now, we'll simulate some lobbies for testing
+      const mockLobbies: any[] = []
+
+      // In a real implementation, this would query other lobby rooms
+      // For now, we'll just update with empty array to clear stale data
+      this.state.updateAvailableLobbies(mockLobbies)
+
+      console.log(`🔄 Hub: Updated available lobbies (${mockLobbies.length} found)`)
+    } catch (error) {
+      console.error("❌ Hub: Error discovering lobbies:", error)
+    }
   }
+
+  onJoin(client: Client, options: any) {
+    console.log(`🚪 Player ${client.sessionId} entered the hub`)
+
+    const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
+    this.state.addPlayer(client.sessionId, username)
+
+    // Send welcome message with hub status
+    client.send("hub_welcome", {
+      message: "Welcome to the game hub!",
+      totalPlayers: this.state.totalPlayers,
+      serverStatus: this.state.serverStatus,
+      availableLobbies: this.state.getAllAvailableLobbies(),
+      timestamp: Date.now(),
+    })
+
+    // Broadcast player count update to all clients
+    this.broadcast("player_count_update", {
+      totalPlayers: this.state.totalPlayers,
+      timestamp: Date.now(),
+    })
+
+    console.log(`📊 Hub now has ${this.state.totalPlayers} players`)
+  }
+
+  onLeave(client: Client, consented: boolean) {
+    console.log(`👋 Player ${client.sessionId} left the hub`)
+
+    this.state.removePlayer(client.sessionId)
+
+    // Broadcast player count update to remaining clients
+    this.broadcast("player_count_update", {
+      totalPlayers: this.state.totalPlayers,
+      timestamp: Date.now(),
+    })
+
+    console.log(`📊 Hub now has ${this.state.totalPlayers} players`)
+  }
+
+  onDispose() {
+    console.log("🏠 Hub room disposing...")
+    if (this.lobbyUpdateInterval) {
+      clearInterval(this.lobbyUpdateInterval)
+    }
+    console.log("🏠 Hub room disposed")
+  }
+
+  // Override to prevent disposal when empty
+  async onAuth(client: Client, options: any) {
+    // Always allow connections to the hub
+    return true
+  }
+
+  // Keep the hub room alive
+  autoDispose = false
 }

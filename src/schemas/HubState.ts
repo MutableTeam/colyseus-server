@@ -1,77 +1,46 @@
 import { Schema, MapSchema, type } from "@colyseus/schema"
-import { Player } from "./Player"
-import { GameListing } from "./GameListing"
+
+export class HubPlayer extends Schema {
+  @type("string") sessionId = ""
+  @type("string") username = ""
+  @type("number") joinedAt = 0
+}
 
 export class HubState extends Schema {
-  @type({ map: Player }) players = new MapSchema<Player>()
-  @type({ map: GameListing }) availableLobbies = new MapSchema<GameListing>()
-  @type("number") totalPlayers = 0
+  @type({ map: HubPlayer }) players = new MapSchema<HubPlayer>()
   @type("string") serverStatus = "online"
-  @type("number") lastUpdated = Date.now()
+  @type("number") totalPlayers = 0
+  @type("number") lastUpdate: number = Date.now()
 
-  addPlayer(id: string, name: string) {
-    const player = new Player()
-    player.id = id
-    player.name = name
-    this.players.set(id, player)
+  addPlayer(sessionId: string, username: string) {
+    const player = new HubPlayer()
+    player.sessionId = sessionId
+    player.username = username
+    player.joinedAt = Date.now()
+
+    this.players.set(sessionId, player)
     this.totalPlayers = this.players.size
-    this.lastUpdated = Date.now()
-    return player
+    this.lastUpdate = Date.now()
   }
 
-  removePlayer(id: string) {
-    if (this.players.has(id)) {
-      this.players.delete(id)
-      this.totalPlayers = this.players.size
-      this.lastUpdated = Date.now()
-      return true
-    }
-    return false
-  }
-
-  updateAvailableLobbies(lobbies: GameListing[]) {
-    // Clear existing lobbies
-    this.availableLobbies.clear()
-
-    // Add new lobbies
-    lobbies.forEach((lobby) => {
-      this.availableLobbies.set(lobby.id, lobby)
-    })
-
-    this.lastUpdated = Date.now()
-  }
-
-  addLobby(lobby: GameListing) {
-    this.availableLobbies.set(lobby.id, lobby)
-    this.lastUpdated = Date.now()
-  }
-
-  removeLobby(lobbyId: string) {
-    if (this.availableLobbies.has(lobbyId)) {
-      this.availableLobbies.delete(lobbyId)
-      this.lastUpdated = Date.now()
-      return true
-    }
-    return false
-  }
-
-  getLobbiesByType(gameType: string) {
-    const lobbies: GameListing[] = []
-    this.availableLobbies.forEach((lobby) => {
-      if (lobby.type === gameType && !lobby.locked && lobby.currentPlayers < lobby.maxPlayers) {
-        lobbies.push(lobby)
-      }
-    })
-    return lobbies.sort((a, b) => b.createdAt - a.createdAt)
+  removePlayer(sessionId: string) {
+    this.players.delete(sessionId)
+    this.totalPlayers = this.players.size
+    this.lastUpdate = Date.now()
   }
 
   getAllAvailableLobbies() {
-    const lobbies: GameListing[] = []
-    this.availableLobbies.forEach((lobby) => {
-      if (!lobby.locked && lobby.currentPlayers < lobby.maxPlayers) {
-        lobbies.push(lobby)
-      }
-    })
-    return lobbies.sort((a, b) => b.createdAt - a.createdAt)
+    // For now return empty array - this will be populated by lobby discovery
+    return []
+  }
+
+  getLobbiesByType(gameType: string) {
+    // For now return empty array - this will be populated by lobby discovery
+    return []
+  }
+
+  updateAvailableLobbies(lobbies: any[]) {
+    // This will be implemented when we add lobby discovery
+    this.lastUpdate = Date.now()
   }
 }
