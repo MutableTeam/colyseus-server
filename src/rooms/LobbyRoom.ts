@@ -51,15 +51,19 @@ export class LobbyRoom extends Room<LobbyState> {
 
     // Handle request for active lobbies by game type
     this.onMessage("get_active_lobbies", (client: Client, message: any) => {
+      console.log(`Player ${client.sessionId} requesting active lobbies with filter:`, message)
+
       const { gameType } = message
 
       let activeLobbies
       if (gameType) {
         // Get lobbies for specific game type
         activeLobbies = this.state.getActiveLobbiesByGameType(gameType)
+        console.log(`Found ${activeLobbies.length} active lobbies for game type: ${gameType}`)
       } else {
         // Get all active lobbies
         activeLobbies = this.state.getAllActiveLobbies()
+        console.log(`Found ${activeLobbies.length} total active lobbies`)
       }
 
       // Send the filtered lobbies to the requesting client
@@ -69,6 +73,16 @@ export class LobbyRoom extends Room<LobbyState> {
       })
 
       console.log(`Sent ${activeLobbies.length} active lobbies to player ${client.sessionId}`)
+    })
+
+    // Add test message handler for debugging
+    this.onMessage("test_message", (client: Client, message: any) => {
+      console.log(`Test message received from ${client.sessionId}:`, message)
+      client.send("test_response", {
+        message: "Test message received successfully",
+        timestamp: Date.now(),
+        clientId: client.sessionId,
+      })
     })
 
     // Set up periodic cleanup of stale games
