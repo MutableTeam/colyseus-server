@@ -1,6 +1,5 @@
 import { Room, type Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
-import { gameType } from "../constants" // Declare the variable before using it
 
 export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
@@ -50,38 +49,30 @@ export class LobbyRoom extends Room<LobbyState> {
       })
     })
 
+    // Handle request for active lobbies by game type
     this.onMessage("get_active_lobbies", (client: Client, message: any) => {
-      try {
-        console.log(`Player ${client.sessionId} requesting active lobbies with filter:`, message)
+      console.log(`Player ${client.sessionId} requesting active lobbies with filter:`, message)
 
-        const { gameType } = message
+      const { gameType } = message
 
-        let activeLobbies
-        if (gameType) {
-          // Get lobbies for specific game type
-          activeLobbies = this.state.getActiveLobbiesByGameType(gameType)
-          console.log(`Found ${activeLobbies.length} active lobbies for game type: ${gameType}`)
-        } else {
-          // Get all active lobbies
-          activeLobbies = this.state.getAllActiveLobbies()
-          console.log(`Found ${activeLobbies.length} total active lobbies`)
-        }
-
-        // Send the filtered lobbies to the requesting client
-        client.send("active_lobbies", {
-          lobbies: activeLobbies,
-          gameType: gameType || "all",
-        })
-
-        console.log(`Sent ${activeLobbies.length} active lobbies to player ${client.sessionId}`)
-      } catch (error) {
-        console.error(`Error getting active lobbies for ${client.sessionId}:`, error)
-        client.send("active_lobbies", {
-          lobbies: [],
-          gameType: gameType || "all",
-          error: "Failed to get active lobbies",
-        })
+      let activeLobbies
+      if (gameType) {
+        // Get lobbies for specific game type
+        activeLobbies = this.state.getActiveLobbiesByGameType(gameType)
+        console.log(`Found ${activeLobbies.length} active lobbies for game type: ${gameType}`)
+      } else {
+        // Get all active lobbies
+        activeLobbies = this.state.getAllActiveLobbies()
+        console.log(`Found ${activeLobbies.length} total active lobbies`)
       }
+
+      // Send the filtered lobbies to the requesting client
+      client.send("active_lobbies", {
+        lobbies: activeLobbies,
+        gameType: gameType || "all",
+      })
+
+      console.log(`Sent ${activeLobbies.length} active lobbies to player ${client.sessionId}`)
     })
 
     // Add test message handler for debugging
@@ -102,19 +93,12 @@ export class LobbyRoom extends Room<LobbyState> {
 
   onJoin(client: Client, options: any) {
     console.log(`Player ${client.sessionId} joined the lobby`)
-    this.state.addPlayer(client.sessionId, options.username || `Player_${client.sessionId.substring(0, 6)}`)
+    this.state.addPlayer(client.sessionId, options.username || `Player_${client.sessionId.substr(0, 6)}`)
 
     // Send current state to the new player
     client.send("lobby_state", {
       players: this.state.players,
       availableGames: this.state.availableGames,
-    })
-
-    // Send current active lobbies to the new player
-    const activeLobbies = this.state.getAllActiveLobbies()
-    client.send("active_lobbies", {
-      lobbies: activeLobbies,
-      gameType: "all",
     })
   }
 
