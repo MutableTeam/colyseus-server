@@ -5,9 +5,6 @@ import { LobbyRoom } from "./rooms/LobbyRoom"
 import { BattleRoom } from "./rooms/BattleRoom"
 import { RaceRoom } from "./rooms/RaceRoom"
 import { PlatformerRoom } from "./rooms/PlatformerRoom"
-import type { Server } from "@colyseus/core"
-
-let gameServerInstance: Server
 
 export default config({
   initializeTransport: (options) =>
@@ -18,9 +15,6 @@ export default config({
     }),
 
   initializeGameServer: (gameServer) => {
-    // Store the game server instance
-    gameServerInstance = gameServer
-
     // Register your room handlers
     gameServer.define("lobby", LobbyRoom)
     gameServer.define("battle", BattleRoom)
@@ -34,61 +28,58 @@ export default config({
       res.json({ status: "ok", uptime: process.uptime() })
     })
 
-    // Get all active lobbies - works without being in a room
-    app.get("/lobbies", async (req, res) => {
+    // Get all active game lobbies - works without being in a room
+    app.get("/api/lobbies", async (req, res) => {
       try {
         const gameType = req.query.gameType as string
         const activeLobbies: any[] = []
 
-        if (!gameServerInstance) {
-          return res.status(503).json({
-            success: false,
-            error: "Game server not initialized",
-            lobbies: [],
-          })
-        }
+        console.log(`API: Getting lobbies for gameType: ${gameType || "all"}`)
 
-        console.log(`API: Getting lobbies, total rooms: ${gameServerInstance.rooms.size}`)
+        // Import the matchMaker from the correct location in v16
+        const { matchMaker } = await import("@colyseus/core")
 
-        // Iterate through all rooms to find lobby rooms
-        for (const [roomId, room] of gameServerInstance.rooms) {
-          if (room.roomName === "lobby" && room.state) {
-            console.log(`API: Processing lobby room ${roomId}`)
+        // Get all lobby rooms from the matchmaker
+        const lobbyRooms = await matchMaker.query({ name: "lobby" })
 
-            try {
-              const lobbyState = room.state as any
+        console.log(`API: Found ${lobbyRooms.length} lobby rooms`)
 
-              if (lobbyState.availableGames && lobbyState.availableGames.size > 0) {
-                console.log(`API: Found ${lobbyState.availableGames.size} games in lobby ${roomId}`)
+        // Process each lobby room
+        for (const roomListingData of lobbyRooms) {
+          try {
+            // Get the actual room instance
+            const room = matchMaker.getRoomById(roomListingData.roomId)
 
-                // Process each game in the lobby
-                for (const [gameId, game] of lobbyState.availableGames) {
-                  console.log(`API: Processing game ${gameId}: ${game.name} (${game.type})`)
+            if (room && room.state && room.state.availableGames) {
+              console.log(`API: Processing lobby room ${room.roomId} with ${room.state.availableGames.size} games`)
 
-                  // Only include games that aren't locked and have space
-                  if (!game.locked && game.currentPlayers < game.maxPlayers) {
-                    // Filter by game type if specified
-                    if (!gameType || game.type === gameType) {
-                      activeLobbies.push({
-                        id: game.id,
-                        name: game.name,
-                        type: game.type,
-                        currentPlayers: game.currentPlayers,
-                        maxPlayers: game.maxPlayers,
-                        creatorId: game.creatorId,
-                        createdAt: game.createdAt,
-                        lobbyRoomId: roomId,
-                      })
-                      console.log(`API: Added lobby: ${game.name}`)
-                    }
+              // Process each game in the lobby
+              room.state.availableGames.forEach((game: any, gameId: string) => {
+                console.log(`API: Processing game ${gameId}: ${game.name} (${game.type})`)
+
+                // Only include games that aren't locked and have space
+                if (!game.locked && game.currentPlayers < game.maxPlayers) {
+                  // Filter by game type if specified
+                  if (!gameType || game.type === gameType) {
+                    activeLobbies.push({
+                      id: game.id,
+                      name: game.name,
+                      type: game.type,
+                      currentPlayers: game.currentPlayers,
+                      maxPlayers: game.maxPlayers,
+                      creatorId: game.creatorId,
+                      createdAt: game.createdAt,
+                      lobbyRoomId: room.roomId,
+                    })
+                    console.log(`API: Added lobby: ${game.name}`)
                   }
                 }
-              } else {
-                console.log(`API: No games found in lobby ${roomId}`)
-              }
-            } catch (roomError: any) {
-              console.warn(`API: Error processing lobby room ${roomId}:`, roomError.message)
+              })
+            } else {
+              console.log(`API: No games found in lobby ${roomListingData.roomId}`)
             }
+          } catch (roomError: any) {
+            console.warn(`API: Error processing lobby room ${roomListingData.roomId}:`, roomError.message)
           }
         }
 
@@ -114,28 +105,28 @@ export default config({
     })
 
     // Get lobby room information (for debugging)
-    app.get("/lobby-rooms", async (req, res) => {
+    app.get("/api/lobby-rooms", async (req, res) => {
       try {
-        if (!gameServerInstance) {
-          return res.status(503).json({
-            success: false,
-            error: "Game server not initialized",
-            lobbyRooms: [],
-          })
-        }
-
+        const { matchMaker } = await import("@colyseus/core")
         const lobbyRooms: any[] = []
 
-        // Find all lobby rooms
-        for (const [roomId, room] of gameServerInstance.rooms) {
-          if (room.roomName === "lobby") {
-            lobbyRooms.push({
-              roomId: roomId,
-              clients: room.clients.length,
-              maxClients: room.maxClients,
-              createdAt: room.createdAt,
-              gameCount: room.state?.availableGames?.size || 0,
-            })
+        // Find all lobby rooms using v16 API
+        const rooms = await matchMaker.query({ name: "lobby" })
+
+        for (const roomListingData of rooms) {
+          try {
+            const room = matchMaker.getRoomById(roomListingData.roomId)
+            if (room) {
+              lobbyRooms.push({
+                roomId: room.roomId,
+                clients: room.clients.length,
+                maxClients: room.maxClients,
+                createdAt: room.createdAt,
+                gameCount: room.state?.availableGames?.size || 0,
+              })
+            }
+          } catch (roomError: any) {
+            console.warn(`API: Error accessing room ${roomListingData.roomId}:`, roomError.message)
           }
         }
 
@@ -171,9 +162,12 @@ export default config({
   beforeListen: () => {
     console.log("🎮 Colyseus server starting...")
     console.log("📡 API endpoints available:")
-    console.log("   GET /lobbies - Get all active lobbies")
-    console.log("   GET /lobbies?gameType=battle - Get lobbies by type")
-    console.log("   GET /lobby-rooms - Get lobby room info")
+    console.log("   GET /api/lobbies - Get all active game lobbies")
+    console.log("   GET /api/lobbies?gameType=battle - Get lobbies by type")
+    console.log("   GET /api/lobby-rooms - Get lobby room info")
     console.log("   GET /health - Health check")
+    console.log("📡 Standard Colyseus endpoints:")
+    console.log("   GET /matchmake/lobby - Get available lobby rooms")
+    console.log("   POST /matchmake/joinOrCreate/lobby - Join or create lobby")
   },
 })
