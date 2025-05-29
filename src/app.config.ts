@@ -129,7 +129,7 @@ export default config({
     // Add debug endpoint to check server state
     app.get("/api/debug", (req, res) => {
       try {
-        const debug = {
+        const debug: any = {
           gameServerExists: !!gameServerInstance,
           matchMakerExists: !!(gameServerInstance && gameServerInstance.matchMaker),
           roomsMapExists: !!(

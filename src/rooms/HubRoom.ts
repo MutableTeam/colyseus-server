@@ -89,35 +89,42 @@ export class HubRoom extends Room<HubState> {
     try {
       const activeRooms: any[] = []
 
-      // Access the matchMaker through the server instance
-      const matchMaker = this.matchMaker
-      console.log("🔍 Hub: matchMaker exists:", !!matchMaker)
+      // Access the matchMaker through the server instance - use proper Colyseus API
+      // In Colyseus, rooms don't have direct access to matchMaker
+      // We need to use a different approach for room discovery
+      console.log("🔍 Hub: Attempting to discover lobbies...")
 
-      if (matchMaker && matchMaker.rooms) {
-        console.log("🔍 Hub: Total rooms in matchMaker:", matchMaker.rooms.size)
+      // Since we can't directly access matchMaker from a room instance,
+      // we'll use the presence system or broadcast to other rooms
+      try {
+        // Try to get room listings from the presence system if available
+        if (this.presence) {
+          const roomListings = await this.presence.hgetall("rooms")
 
-        for (const [roomId, room] of matchMaker.rooms) {
-          console.log(`🔍 Hub: Checking room ${roomId}:`, {
-            roomName: room.roomName,
-            clients: room.clients.size,
-            maxClients: room.maxClients,
-            locked: room.locked,
-          })
+          for (const [roomId, roomDataStr] of Object.entries(roomListings)) {
+            try {
+              const roomData = JSON.parse(roomDataStr as string)
 
-          // Only include lobby rooms that are joinable
-          if (room.roomName === "lobby" && !room.locked && room.clients.size < room.maxClients) {
-            activeRooms.push({
-              id: roomId,
-              name: `Lobby ${roomId.substring(0, 8)}`,
-              type: "lobby",
-              currentPlayers: room.clients.size || 0,
-              maxPlayers: room.maxClients || 50,
-              createdAt: room.createdAt ? new Date(room.createdAt).getTime() : Date.now(),
-              locked: room.locked || false,
-              private: room.private || false,
-            })
+              // Only include lobby rooms that are joinable
+              if (roomData.name === "lobby" && !roomData.locked && roomData.clients < roomData.maxClients) {
+                activeRooms.push({
+                  id: roomId,
+                  name: `Lobby ${roomId.substring(0, 8)}`,
+                  type: "lobby",
+                  currentPlayers: roomData.clients || 0,
+                  maxPlayers: roomData.maxClients || 50,
+                  createdAt: roomData.createdAt ? new Date(roomData.createdAt).getTime() : Date.now(),
+                  locked: roomData.locked || false,
+                  private: roomData.private || false,
+                })
+              }
+            } catch (parseError) {
+              console.log(`Failed to parse room data for ${roomId}:`, parseError)
+            }
           }
         }
+      } catch (presenceError) {
+        console.log("🔍 Hub: Presence system not available for room discovery:", presenceError)
       }
 
       // Update the hub state with discovered lobbies
