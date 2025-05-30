@@ -1,4 +1,4 @@
-import { Room, type Client } from "@colyseus/core"
+import { Room, type Client, updateLobby } from "@colyseus/core"
 import { BattleState, MapObject } from "../schemas/BattleState"
 import { Player } from "../schemas/Player"
 import { Projectile } from "../schemas/Projectile"
@@ -20,6 +20,15 @@ export class BattleRoom extends Room<BattleState> {
 
   onCreate(options: any) {
     console.log("BattleRoom created!", options)
+
+    // Set metadata for lobby discovery
+    this.setMetadata({
+      name: options.roomName || `Battle_${Date.now().toString().substring(8)}`,
+      gameMode: options.gameMode || "deathmatch",
+      mapTheme: options.mapTheme || "default",
+      isPublic: !options.private,
+      createdAt: Date.now(),
+    })
 
     // Set map dimensions from options or use defaults
     this.mapWidth = options.mapWidth || this.mapWidth
@@ -143,6 +152,8 @@ export class BattleRoom extends Room<BattleState> {
       // Check if all players are ready to start the game
       this.checkGameStart()
     })
+
+    console.log(`🎮 BattleRoom ${this.roomId} created and discoverable via lobby`)
   }
 
   onJoin(client: Client, options: any) {
@@ -167,6 +178,9 @@ export class BattleRoom extends Room<BattleState> {
     // Add player to the game state
     this.state.players.set(client.sessionId, player)
 
+    // Update lobby with new player count
+    this.updateLobbyMetadata()
+
     // Broadcast new player joined
     this.broadcast("player_joined", {
       id: player.id,
@@ -179,6 +193,8 @@ export class BattleRoom extends Room<BattleState> {
         z: player.position.z,
       },
     })
+
+    console.log(`📊 BattleRoom now has ${this.clients.length} players`)
   }
 
   onLeave(client: Client, consented: boolean) {
@@ -188,11 +204,33 @@ export class BattleRoom extends Room<BattleState> {
     if (this.state.players.has(client.sessionId)) {
       this.state.players.delete(client.sessionId)
 
+      // Update lobby with new player count
+      this.updateLobbyMetadata()
+
       // Broadcast player left
       this.broadcast("player_left", { id: client.sessionId })
 
       // Check if game should end (e.g., only one player left)
       this.checkGameEnd()
+    }
+
+    console.log(`📊 BattleRoom now has ${this.clients.length} players`)
+  }
+
+  private async updateLobbyMetadata() {
+    try {
+      await this.setMetadata({
+        ...this.metadata,
+        currentPlayers: this.clients.length,
+        maxPlayers: this.maxClients,
+        gameStarted: this.state.gameStarted,
+        gameEnded: this.state.gameEnded,
+      })
+
+      // Notify lobby of the update
+      updateLobby(this)
+    } catch (error) {
+      console.error("Failed to update lobby metadata:", error)
     }
   }
 
@@ -628,6 +666,9 @@ export class BattleRoom extends Room<BattleState> {
       player.animationState = "idle"
     })
 
+    // Update lobby metadata
+    this.updateLobbyMetadata()
+
     // Broadcast game start
     this.broadcast("game_started", {
       mapWidth: this.mapWidth,
@@ -676,6 +717,9 @@ export class BattleRoom extends Room<BattleState> {
         }
       })
     }
+
+    // Update lobby metadata
+    this.updateLobbyMetadata()
 
     // Broadcast game end
     const playerStats: Array<{ id: string; name: string; kills: number; characterType: string }> = []

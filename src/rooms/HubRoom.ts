@@ -163,10 +163,9 @@ export class HubRoom extends Room<HubState> {
     console.log(`🚪 Player ${client.sessionId} entered the hub`)
 
     const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
-    this.state.addPlayer(client.sessionId, username)
 
-    this.state.totalPlayers = this.state.players.size
-    this.state.lastUpdate = Date.now()
+    // Add player to state and update total count
+    this.state.addPlayer(client.sessionId, username)
 
     console.log(`📊 Hub player count after join: ${this.state.totalPlayers}`)
 
@@ -180,14 +179,10 @@ export class HubRoom extends Room<HubState> {
     })
 
     // Broadcast player count update to all clients
-    this.broadcast(
-      "player_count_update",
-      {
-        totalPlayers: this.state.totalPlayers,
-        timestamp: Date.now(),
-      },
-      { afterNextPatch: true },
-    )
+    this.broadcast("player_count_update", {
+      totalPlayers: this.state.totalPlayers,
+      timestamp: Date.now(),
+    })
 
     console.log(`📊 Hub now has ${this.state.totalPlayers} players`)
   }
@@ -195,21 +190,16 @@ export class HubRoom extends Room<HubState> {
   onLeave(client: Client, consented: boolean) {
     console.log(`👋 Player ${client.sessionId} left the hub`)
 
+    // Remove player from state and update total count
     this.state.removePlayer(client.sessionId)
-    this.state.totalPlayers = this.state.players.size
-    this.state.lastUpdate = Date.now()
 
     console.log(`📊 Hub player count after leave: ${this.state.totalPlayers}`)
 
     // Broadcast player count update to remaining clients
-    this.broadcast(
-      "player_count_update",
-      {
-        totalPlayers: this.state.totalPlayers,
-        timestamp: Date.now(),
-      },
-      { afterNextPatch: true },
-    )
+    this.broadcast("player_count_update", {
+      totalPlayers: this.state.totalPlayers,
+      timestamp: Date.now(),
+    })
 
     console.log(`📊 Hub now has ${this.state.totalPlayers} players`)
   }
