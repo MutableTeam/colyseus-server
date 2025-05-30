@@ -199,20 +199,31 @@ export class LobbyRoom extends Room<LobbyState> {
 
       console.log(`✅ LobbyRoom: Player ${username} (${client.sessionId}) added to state`)
 
-      // Send current state to the new player
-      client.send("lobby_state", {
-        players: Array.from(this.state.players.entries()).map(([id, player]) => ({
-          id,
+      // Send current state to the new player - FIXED TypeScript errors
+      const playersArray: Array<{ id: string; name: string; ready: boolean }> = []
+      this.state.players.forEach((player, id) => {
+        playersArray.push({
+          id: id,
           name: player.name,
           ready: player.ready,
-        })),
-        availableGames: Array.from(this.state.availableGames.entries()).map(([id, game]) => ({
-          id,
+        })
+      })
+
+      const gamesArray: Array<{ id: string; name: string; type: string; currentPlayers: number; maxPlayers: number }> =
+        []
+      this.state.availableGames.forEach((game, id) => {
+        gamesArray.push({
+          id: id,
           name: game.name,
           type: game.type,
           currentPlayers: game.currentPlayers,
           maxPlayers: game.maxPlayers,
-        })),
+        })
+      })
+
+      client.send("lobby_state", {
+        players: playersArray,
+        availableGames: gamesArray,
         lobbyId: this.roomId,
         metadata: this.metadata,
         timestamp: Date.now(),
