@@ -66,6 +66,7 @@ export class LobbyState extends Schema {
     const player = new Player()
     player.id = id
     player.name = name
+    player.ready = false // Initialize ready state to false
     this.players.set(id, player)
     return player
   }

@@ -83,6 +83,42 @@ export class LobbyRoom extends Room<LobbyState> {
       console.log(`Sent ${activeLobbies.length} active lobbies to player ${client.sessionId}`)
     })
 
+    // Handle ready state
+    this.onMessage("ready", (client: Client, message: any) => {
+      console.log(`Player ${client.sessionId} ready state changed to: ${message.ready}`)
+
+      const player = this.state.players.get(client.sessionId)
+      if (!player) return
+
+      // Update player ready state
+      player.ready = message.ready
+
+      // Broadcast ready state change to all clients
+      this.broadcast("player_ready_changed", {
+        playerId: client.sessionId,
+        ready: message.ready,
+      })
+
+      // Check if all players are ready
+      let allReady = true
+      let playerCount = 0
+
+      this.state.players.forEach((p) => {
+        playerCount++
+        if (!p.ready) {
+          allReady = false
+        }
+      })
+
+      // If all players are ready, broadcast it
+      if (allReady && playerCount > 0) {
+        this.broadcast("all_players_ready", {
+          playerCount: playerCount,
+          timestamp: Date.now(),
+        })
+      }
+    })
+
     // Add test message handler for debugging
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`Test message received from ${client.sessionId}:`, message)
