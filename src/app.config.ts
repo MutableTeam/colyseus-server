@@ -20,17 +20,22 @@ export default config({
     // Register the hub room first - this is the main entry point
     gameServer.define("hub", HubRoom)
 
-    // Register game-specific rooms
+    // Register the built-in LobbyRoom
     gameServer.define("lobby", LobbyRoom)
-    gameServer.define("battle", BattleRoom)
-    gameServer.define("race", RaceRoom)
-    gameServer.define("platformer", PlatformerRoom)
+
+    // Register game-specific rooms with real-time listing enabled
+    gameServer.define("battle", BattleRoom).enableRealtimeListing()
+
+    gameServer.define("race", RaceRoom).enableRealtimeListing()
+
+    gameServer.define("platformer", PlatformerRoom).enableRealtimeListing()
 
     gameServer.onShutdown(() => {
       console.log("🛑 Game server shutting down...")
     })
 
     console.log("🎮 Game server initialized with room definitions")
+    console.log("🔄 Real-time listing enabled for game rooms")
   },
 
   initializeExpress: (app) => {
