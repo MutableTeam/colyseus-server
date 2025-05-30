@@ -1,5 +1,4 @@
 import { Room, type Client } from "@colyseus/core"
-import { matchMaker } from "colyseus"
 import { LobbyState } from "../schemas/LobbyState"
 
 export class LobbyRoom extends Room<LobbyState> {
@@ -59,19 +58,19 @@ export class LobbyRoom extends Room<LobbyState> {
     })
 
     // Handle request for active lobbies by game type
-    this.onMessage("get_active_lobbies", async (client: Client, message: any) => {
+    this.onMessage("get_active_lobbies", (client: Client, message: any) => {
       console.log(`Player ${client.sessionId} requesting active lobbies with filter:`, message)
 
       const { gameType } = message
 
       let activeLobbies
       if (gameType) {
-        // Get lobbies for specific game type using matchMaker.query()
-        activeLobbies = await this.getActiveLobbiesByGameType(gameType)
+        // Get lobbies for specific game type from local state
+        activeLobbies = this.state.getActiveLobbiesByGameType(gameType)
         console.log(`Found ${activeLobbies.length} active lobbies for game type: ${gameType}`)
       } else {
-        // Get all active lobbies using matchMaker.query()
-        activeLobbies = await this.getAllActiveLobbies()
+        // Get all active lobbies from local state
+        activeLobbies = this.state.getAllActiveLobbies()
         console.log(`Found ${activeLobbies.length} total active lobbies`)
       }
 
@@ -103,7 +102,7 @@ export class LobbyRoom extends Room<LobbyState> {
     this.broadcast("lobby_available", {
       id: this.roomId,
       name: this.metadata.name,
-      clients: this.clients.size,
+      clients: this.clients.length,
       maxClients: this.maxClients,
       timestamp: Date.now(),
     })
@@ -125,7 +124,7 @@ export class LobbyRoom extends Room<LobbyState> {
 
     // Broadcast updated player count for discovery
     this.broadcast("player_count_update", {
-      count: this.clients.size,
+      count: this.clients.length,
       maxPlayers: this.maxClients,
       timestamp: Date.now(),
     })
@@ -142,7 +141,7 @@ export class LobbyRoom extends Room<LobbyState> {
 
     // Broadcast updated player count
     this.broadcast("player_count_update", {
-      count: this.clients.size,
+      count: this.clients.length,
       maxPlayers: this.maxClients,
       timestamp: Date.now(),
     })
@@ -150,73 +149,5 @@ export class LobbyRoom extends Room<LobbyState> {
 
   onDispose() {
     console.log("Lobby room disposed")
-  }
-
-  async getActiveLobbiesByGameType(gameType: string): Promise<any[]> {
-    try {
-      console.log(`🔍 Lobby: Querying for ${gameType} rooms using matchMaker.query()`)
-      const rooms = await matchMaker.query({ name: gameType })
-
-      // Filter for joinable rooms
-      const activeLobbies = rooms
-        .filter((room) => !room.locked && room.clients < room.maxClients)
-        .map((room) => ({
-          id: room.roomId,
-          name: room.metadata?.name || `${room.name}_${room.roomId.substring(0, 8)}`,
-          type: room.name,
-          currentPlayers: room.clients || 0,
-          maxPlayers: room.maxClients || 50,
-          createdAt: room.createdAt || Date.now(),
-          locked: room.locked || false,
-          private: room.private || false,
-        }))
-
-      console.log(`🔍 Lobby: Found ${activeLobbies.length} active lobbies for game type: ${gameType}`)
-
-      // Sort by creation time (newest first)
-      return activeLobbies.sort((a, b) => b.createdAt - a.createdAt)
-    } catch (error) {
-      console.error(`❌ Lobby: Error querying ${gameType} rooms:`, error)
-      return []
-    }
-  }
-
-  async getAllActiveLobbies(): Promise<any[]> {
-    try {
-      console.log(`🔍 Lobby: Querying for all room types using matchMaker.query()`)
-
-      const roomTypes = ["lobby", "battle", "race", "platformer"]
-      const allRoomQueries = roomTypes.map(async (roomType) => {
-        try {
-          const rooms = await matchMaker.query({ name: roomType })
-          return rooms
-            .filter((room) => !room.locked && room.clients < room.maxClients)
-            .map((room) => ({
-              id: room.roomId,
-              name: room.metadata?.name || `${room.name}_${room.roomId.substring(0, 8)}`,
-              type: room.name,
-              currentPlayers: room.clients || 0,
-              maxPlayers: room.maxClients || 50,
-              createdAt: room.createdAt || Date.now(),
-              locked: room.locked || false,
-              private: room.private || false,
-            }))
-        } catch (error) {
-          console.log(`🔍 Lobby: No ${roomType} rooms found`)
-          return []
-        }
-      })
-
-      const roomResults = await Promise.all(allRoomQueries)
-      const activeLobbies = roomResults.flat()
-
-      console.log(`🔍 Lobby: Found ${activeLobbies.length} total active lobbies`)
-
-      // Sort by creation time (newest first)
-      return activeLobbies.sort((a, b) => b.createdAt - a.createdAt)
-    } catch (error) {
-      console.error(`❌ Lobby: Error querying all rooms:`, error)
-      return []
-    }
   }
 }
