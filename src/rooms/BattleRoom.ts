@@ -142,15 +142,99 @@ export class BattleRoom extends Room<BattleState> {
       })
     })
 
-    // Handle ready state
+    // Handle ready state - ENHANCED VERSION
     this.onMessage("ready", (client: Client, message: any) => {
-      const player = this.state.players.get(client.sessionId)
-      if (!player) return
+      try {
+        console.log(`🎯 BattleRoom: Player ${client.sessionId} ready state message:`, message)
 
-      player.ready = message.ready
+        const player = this.state.players.get(client.sessionId)
+        if (!player) {
+          console.log(`❌ BattleRoom: Player ${client.sessionId} not found in state`)
+          client.send("error", { message: "Player not found in battle room" })
+          return
+        }
 
-      // Check if all players are ready to start the game
-      this.checkGameStart()
+        // Validate message
+        if (typeof message.ready !== "boolean") {
+          console.log(`❌ BattleRoom: Invalid ready state from ${client.sessionId}:`, message.ready)
+          client.send("error", { message: "Invalid ready state" })
+          return
+        }
+
+        // Update player ready state
+        const oldReadyState = player.ready
+        player.ready = message.ready
+
+        console.log(
+          `✅ BattleRoom: Player ${client.sessionId} (${player.name}) ready state changed from ${oldReadyState} to ${player.ready}`,
+        )
+
+        // Broadcast ready state change to all clients
+        this.broadcast("player_ready_changed", {
+          playerId: client.sessionId,
+          playerName: player.name,
+          ready: player.ready,
+          timestamp: Date.now(),
+        })
+
+        // Check if all players are ready
+        let allReady = true
+        let readyCount = 0
+        let totalPlayers = 0
+
+        this.state.players.forEach((p) => {
+          totalPlayers++
+          if (p.ready) {
+            readyCount++
+          } else {
+            allReady = false
+          }
+        })
+
+        console.log(`📊 BattleRoom: Ready status - ${readyCount}/${totalPlayers} players ready`)
+
+        // Broadcast ready count update
+        this.broadcast("battle_ready_update", {
+          readyCount,
+          totalPlayers,
+          allReady,
+          timestamp: Date.now(),
+        })
+
+        // If all players are ready and we have at least 2 players, start countdown
+        if (allReady && totalPlayers >= 2 && !this.state.gameStarted) {
+          console.log(`🎉 BattleRoom: All ${totalPlayers} players are ready! Starting game...`)
+          this.broadcast("all_players_ready", {
+            playerCount: totalPlayers,
+            readyCount,
+            timestamp: Date.now(),
+          })
+
+          // Start the game after a short delay
+          this.clock.setTimeout(() => {
+            this.startGame()
+          }, 3000) // 3 second countdown
+        }
+      } catch (error) {
+        console.error(`❌ BattleRoom: Error handling ready message from ${client.sessionId}:`, error)
+        client.send("error", { message: "Failed to process ready state" })
+      }
+    })
+
+    // Add test message handler for debugging
+    this.onMessage("test_message", (client: Client, message: any) => {
+      console.log(`🧪 BattleRoom: Test message received from ${client.sessionId}:`, message)
+      client.send("test_response", {
+        message: "Battle room received your message!",
+        timestamp: Date.now(),
+        clientId: client.sessionId,
+        roomId: this.roomId,
+      })
+    })
+
+    // Handle ping/heartbeat messages
+    this.onMessage("ping", (client: Client, message: any) => {
+      client.send("pong", { timestamp: Date.now() })
     })
 
     console.log(`🎮 BattleRoom ${this.roomId} created and discoverable via lobby`)
@@ -194,6 +278,21 @@ export class BattleRoom extends Room<BattleState> {
       },
     })
 
+    // Send current ready state to the new player
+    let readyCount = 0
+    let totalPlayers = 0
+    this.state.players.forEach((player) => {
+      totalPlayers++
+      if (player.ready) readyCount++
+    })
+
+    client.send("battle_ready_update", {
+      readyCount,
+      totalPlayers,
+      allReady: readyCount === totalPlayers,
+      timestamp: Date.now(),
+    })
+
     console.log(`📊 BattleRoom now has ${this.clients.length} players`)
   }
 
@@ -209,6 +308,21 @@ export class BattleRoom extends Room<BattleState> {
 
       // Broadcast player left
       this.broadcast("player_left", { id: client.sessionId })
+
+      // Update ready count after player leaves
+      let readyCount = 0
+      let totalPlayers = 0
+      this.state.players.forEach((player: Player) => {
+        totalPlayers++
+        if (player.ready) readyCount++
+      })
+
+      this.broadcast("battle_ready_update", {
+        readyCount,
+        totalPlayers,
+        allReady: readyCount === totalPlayers && totalPlayers > 0,
+        timestamp: Date.now(),
+      })
 
       // Check if game should end (e.g., only one player left)
       this.checkGameEnd()
