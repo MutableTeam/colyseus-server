@@ -1,14 +1,12 @@
 import config from "@colyseus/tools"
 import { monitor } from "@colyseus/monitor"
 import { WebSocketTransport } from "@colyseus/ws-transport"
+import { matchMaker } from "colyseus"
 import { HubRoom } from "./rooms/HubRoom"
 import { LobbyRoom } from "./rooms/LobbyRoom"
 import { BattleRoom } from "./rooms/BattleRoom"
 import { RaceRoom } from "./rooms/RaceRoom"
 import { PlatformerRoom } from "./rooms/PlatformerRoom"
-
-// Store gameServer reference globally so we can access it in API routes
-let gameServerInstance: any = null
 
 export default config({
   initializeTransport: (options) =>
@@ -19,9 +17,6 @@ export default config({
     }),
 
   initializeGameServer: (gameServer) => {
-    // Store the gameServer instance globally
-    gameServerInstance = gameServer
-
     // Register the hub room first - this is the main entry point
     gameServer.define("hub", HubRoom)
 
@@ -31,7 +26,6 @@ export default config({
     gameServer.define("race", RaceRoom)
     gameServer.define("platformer", PlatformerRoom)
 
-    // Create a persistent hub room on server start
     gameServer.onShutdown(() => {
       console.log("🛑 Game server shutting down...")
     })
@@ -40,7 +34,7 @@ export default config({
   },
 
   initializeExpress: (app) => {
-    // Add health check endpoint
+    // Health check endpoint
     app.get("/health", (req, res) => {
       res.json({
         status: "ok",
@@ -69,92 +63,129 @@ export default config({
       }
     })
 
-    // Add API endpoint to get available rooms - FIXED VERSION
-    app.get("/api/rooms", (req, res) => {
+    // Get available rooms using official Colyseus matchMaker API
+    app.get("/api/rooms", async (req, res) => {
       try {
-        const rooms: any[] = []
+        const gameTypeFilter = req.query.gameType as string
+        console.log("🔍 API: Searching for rooms using matchMaker.query()")
+        console.log("🔍 API: Requested game type filter:", gameTypeFilter || "all")
 
-        console.log("🔍 API: Checking for active rooms...")
-        console.log("🔍 API: gameServerInstance exists:", !!gameServerInstance)
+        let rooms: any[] = []
 
-        if (gameServerInstance && gameServerInstance.matchMaker) {
-          const matchMaker = gameServerInstance.matchMaker
-          console.log("🔍 API: matchMaker exists:", !!matchMaker)
-          console.log("🔍 API: matchMaker.rooms exists:", !!matchMaker.rooms)
-
-          if (matchMaker.rooms) {
-            console.log("🔍 API: Total rooms in matchMaker:", matchMaker.rooms.size)
-
-            // Iterate through all active rooms
-            for (const [roomId, room] of matchMaker.rooms) {
-              console.log(`🔍 API: Found room ${roomId}:`, {
-                roomName: room.roomName,
-                clients: room.clients.size,
-                maxClients: room.maxClients,
-                locked: room.locked,
-                private: room.private,
-              })
-
-              // Only include rooms that are joinable
-              if (!room.locked && room.clients.size < room.maxClients) {
-                rooms.push({
-                  roomId: roomId,
-                  name: room.roomName,
-                  type: room.roomName,
-                  clients: room.clients.size,
-                  maxClients: room.maxClients,
-                  locked: room.locked || false,
-                  private: room.private || false,
-                  createdAt: room.createdAt || new Date().toISOString(),
-                  metadata: room.metadata || {},
-                })
-              }
-            }
-          }
+        if (gameTypeFilter) {
+          // Query for specific room type
+          console.log(`🔍 API: Querying for rooms with name: ${gameTypeFilter}`)
+          rooms = await matchMaker.query({ name: gameTypeFilter })
         } else {
-          console.log("❌ API: gameServerInstance or matchMaker not available")
+          // Query for all supported room types
+          const roomTypes = ["hub", "lobby", "battle", "race", "platformer"]
+          const allRoomQueries = roomTypes.map(async (roomType) => {
+            try {
+              const roomsOfType = await matchMaker.query({ name: roomType })
+              return roomsOfType
+            } catch (error) {
+              console.log(`No rooms found for type: ${roomType}`)
+              return []
+            }
+          })
+
+          const roomResults = await Promise.all(allRoomQueries)
+          rooms = roomResults.flat()
         }
 
-        console.log(`📊 API: Returning ${rooms.length} available rooms`)
-        res.json(rooms)
+        console.log(`📊 API: matchMaker.query() returned ${rooms.length} rooms`)
+
+        // Transform and filter results
+        const formattedRooms = rooms
+          .filter((room) => {
+            // Only include rooms that are joinable (not locked and not full)
+            const isJoinable = !room.locked && room.clients < room.maxClients
+            console.log(
+              `🔍 API: Room ${room.roomId} (${room.name}) - locked: ${room.locked}, clients: ${room.clients}/${room.maxClients}, joinable: ${isJoinable}`,
+            )
+            return isJoinable
+          })
+          .map((room) => ({
+            roomId: room.roomId,
+            name: room.metadata?.name || `${room.name}_${room.roomId.substring(0, 8)}`,
+            type: room.name,
+            clients: room.clients || 0,
+            maxClients: room.maxClients || 50,
+            locked: room.locked || false,
+            private: room.private || false,
+            createdAt: room.createdAt || Date.now(),
+            metadata: room.metadata || {},
+          }))
+
+        console.log(`📊 API: Returning ${formattedRooms.length} joinable rooms`)
+
+        formattedRooms.forEach((room, index) => {
+          console.log(
+            `📋 API Room ${index + 1}: ${room.name} (${room.type}) - ${room.clients}/${room.maxClients} players - ID: ${room.roomId}`,
+          )
+        })
+
+        res.json(formattedRooms)
       } catch (error: any) {
-        console.error("❌ API: Error getting rooms:", error)
+        console.error("❌ API: Error in /api/rooms endpoint:", error)
         res.status(500).json({
           error: "Failed to get rooms",
           details: error.message,
+          rooms: [],
         })
       }
     })
 
-    // Add debug endpoint to check server state
-    app.get("/api/debug", (req, res) => {
+    // Debug endpoint using official matchMaker API
+    app.get("/api/debug", async (req, res) => {
       try {
         const debug: any = {
-          gameServerExists: !!gameServerInstance,
-          matchMakerExists: !!(gameServerInstance && gameServerInstance.matchMaker),
-          roomsMapExists: !!(
-            gameServerInstance &&
-            gameServerInstance.matchMaker &&
-            gameServerInstance.matchMaker.rooms
-          ),
-          totalRooms:
-            gameServerInstance && gameServerInstance.matchMaker && gameServerInstance.matchMaker.rooms
-              ? gameServerInstance.matchMaker.rooms.size
-              : 0,
+          matchMakerExists: !!matchMaker,
           timestamp: Date.now(),
         }
 
-        if (gameServerInstance && gameServerInstance.matchMaker && gameServerInstance.matchMaker.rooms) {
-          debug.roomDetails = []
-          for (const [roomId, room] of gameServerInstance.matchMaker.rooms) {
-            debug.roomDetails.push({
-              id: roomId,
-              name: room.roomName,
-              clients: room.clients.size,
-              maxClients: room.maxClients,
-              locked: room.locked,
-              private: room.private,
-            })
+        // Get matchMaker stats
+        try {
+          if (matchMaker.stats) {
+            debug.localStats = {
+              ccu: matchMaker.stats.local.ccu,
+              roomCount: matchMaker.stats.local.roomCount,
+            }
+
+            try {
+              const globalStats = await matchMaker.stats.fetchAll()
+              debug.globalStats = globalStats
+            } catch (globalError) {
+              debug.globalStatsError = globalError.message
+            }
+          }
+        } catch (statsError: any) {
+          debug.statsError = statsError.message
+        }
+
+        // Test matchMaker.query for each room type
+        const roomTypes = ["hub", "lobby", "battle", "race", "platformer"]
+        debug.roomQueries = {}
+
+        for (const roomType of roomTypes) {
+          try {
+            const rooms = await matchMaker.query({ name: roomType })
+            debug.roomQueries[roomType] = {
+              count: rooms.length,
+              rooms: rooms.map((room) => ({
+                id: room.roomId,
+                name: room.name,
+                clients: room.clients,
+                maxClients: room.maxClients,
+                locked: room.locked,
+              })),
+            }
+          } catch (queryError: any) {
+            debug.roomQueries[roomType] = {
+              error: queryError.message,
+              count: 0,
+              rooms: [],
+            }
           }
         }
 
@@ -162,6 +193,71 @@ export default config({
       } catch (error: any) {
         res.status(500).json({
           error: "Debug failed",
+          details: error.message,
+        })
+      }
+    })
+
+    // Test specific matchMaker methods
+    app.get("/api/matchmaker-test", async (req, res) => {
+      try {
+        const results: any = {
+          timestamp: Date.now(),
+          tests: {},
+        }
+
+        // Test 1: Query all rooms
+        try {
+          const allRooms = await matchMaker.query({})
+          results.tests.queryAll = {
+            success: true,
+            count: allRooms.length,
+            rooms: allRooms.map((r) => ({ id: r.roomId, name: r.name, clients: r.clients })),
+          }
+        } catch (error: any) {
+          results.tests.queryAll = { success: false, error: error.message }
+        }
+
+        // Test 2: Query lobby rooms specifically
+        try {
+          const lobbyRooms = await matchMaker.query({ name: "lobby" })
+          results.tests.queryLobby = {
+            success: true,
+            count: lobbyRooms.length,
+            rooms: lobbyRooms.map((r) => ({ id: r.roomId, name: r.name, clients: r.clients })),
+          }
+        } catch (error: any) {
+          results.tests.queryLobby = { success: false, error: error.message }
+        }
+
+        // Test 3: Find one available lobby room
+        try {
+          const availableRoom = await matchMaker.findOneRoomAvailable("lobby", {})
+          results.tests.findOneAvailable = {
+            success: true,
+            room: availableRoom
+              ? { id: availableRoom.roomId, name: availableRoom.name, clients: availableRoom.clients }
+              : null,
+          }
+        } catch (error: any) {
+          results.tests.findOneAvailable = { success: false, error: error.message }
+        }
+
+        // Test 4: Get global CCU
+        try {
+          const globalCCU = await matchMaker.stats.getGlobalCCU()
+          results.tests.globalCCU = {
+            success: true,
+            ccu: globalCCU,
+          }
+        } catch (error: any) {
+          results.tests.globalCCU = { success: false, error: error.message }
+        }
+
+        res.json(results)
+      } catch (error: any) {
+        res.status(500).json({
+          error: "MatchMaker test failed",
           details: error.message,
         })
       }
@@ -186,8 +282,9 @@ export default config({
     console.log("🏠 Hub room will be the main entry point for all players")
     console.log("📡 API endpoints available:")
     console.log("   GET /api/hub - Get hub status")
-    console.log("   GET /api/rooms - Get available rooms")
-    console.log("   GET /api/debug - Debug server state")
+    console.log("   GET /api/rooms - Get available rooms (using matchMaker.query)")
+    console.log("   GET /api/debug - Debug server state and test matchMaker")
+    console.log("   GET /api/matchmaker-test - Test specific matchMaker methods")
     console.log("   GET /health - Health check")
     console.log("📡 Standard Colyseus endpoints:")
     console.log("   GET /matchmake/hub - Get available hub rooms")
