@@ -83,50 +83,94 @@ export class LobbyRoom extends Room<LobbyState> {
       console.log(`Sent ${activeLobbies.length} active lobbies to player ${client.sessionId}`)
     })
 
-    // Handle ready state
+    // Handle ready state - FIXED VERSION
     this.onMessage("ready", (client: Client, message: any) => {
-      console.log(`Player ${client.sessionId} ready state changed to: ${message.ready}`)
+      try {
+        console.log(`🎯 LobbyRoom: Player ${client.sessionId} ready state message:`, message)
 
-      const player = this.state.players.get(client.sessionId)
-      if (!player) return
-
-      // Update player ready state
-      player.ready = message.ready
-
-      // Broadcast ready state change to all clients
-      this.broadcast("player_ready_changed", {
-        playerId: client.sessionId,
-        ready: message.ready,
-      })
-
-      // Check if all players are ready
-      let allReady = true
-      let playerCount = 0
-
-      this.state.players.forEach((p) => {
-        playerCount++
-        if (!p.ready) {
-          allReady = false
+        const player = this.state.players.get(client.sessionId)
+        if (!player) {
+          console.log(`❌ LobbyRoom: Player ${client.sessionId} not found in state`)
+          client.send("error", { message: "Player not found in lobby" })
+          return
         }
-      })
 
-      // If all players are ready, broadcast it
-      if (allReady && playerCount > 0) {
-        this.broadcast("all_players_ready", {
-          playerCount: playerCount,
+        // Validate message
+        if (typeof message.ready !== "boolean") {
+          console.log(`❌ LobbyRoom: Invalid ready state from ${client.sessionId}:`, message.ready)
+          client.send("error", { message: "Invalid ready state" })
+          return
+        }
+
+        // Update player ready state
+        const oldReadyState = player.ready
+        player.ready = message.ready
+
+        console.log(
+          `✅ LobbyRoom: Player ${client.sessionId} ready state changed from ${oldReadyState} to ${player.ready}`,
+        )
+
+        // Broadcast ready state change to all clients
+        this.broadcast("player_ready_changed", {
+          playerId: client.sessionId,
+          playerName: player.name,
+          ready: player.ready,
           timestamp: Date.now(),
         })
+
+        // Check if all players are ready
+        let allReady = true
+        let readyCount = 0
+        let totalPlayers = 0
+
+        this.state.players.forEach((p) => {
+          totalPlayers++
+          if (p.ready) {
+            readyCount++
+          } else {
+            allReady = false
+          }
+        })
+
+        console.log(`📊 LobbyRoom: Ready status - ${readyCount}/${totalPlayers} players ready`)
+
+        // Broadcast ready count update
+        this.broadcast("lobby_ready_update", {
+          readyCount,
+          totalPlayers,
+          allReady,
+          timestamp: Date.now(),
+        })
+
+        // If all players are ready, broadcast it
+        if (allReady && totalPlayers > 0) {
+          console.log(`🎉 LobbyRoom: All ${totalPlayers} players are ready!`)
+          this.broadcast("all_players_ready", {
+            playerCount: totalPlayers,
+            readyCount,
+            timestamp: Date.now(),
+          })
+        }
+      } catch (error) {
+        console.error(`❌ LobbyRoom: Error handling ready message from ${client.sessionId}:`, error)
+        client.send("error", { message: "Failed to process ready state" })
       }
     })
 
     // Add test message handler for debugging
     this.onMessage("test_message", (client: Client, message: any) => {
-      console.log(`Test message received from ${client.sessionId}:`, message)
+      console.log(`🧪 LobbyRoom: Test message received from ${client.sessionId}:`, message)
       client.send("test_response", {
         message: "Test message received successfully",
         timestamp: Date.now(),
         clientId: client.sessionId,
+        roomId: this.roomId,
       })
+    })
+
+    // Handle ping/heartbeat messages
+    this.onMessage("ping", (client: Client, message: any) => {
+      client.send("pong", { timestamp: Date.now() })
     })
 
     // Set up periodic cleanup of stale games
@@ -147,43 +191,93 @@ export class LobbyRoom extends Room<LobbyState> {
   }
 
   onJoin(client: Client, options: any) {
-    console.log(`Player ${client.sessionId} joined the lobby`)
-    this.state.addPlayer(client.sessionId, options.username || `Player_${client.sessionId.substr(0, 6)}`)
+    console.log(`🚪 LobbyRoom: Player ${client.sessionId} joined the lobby`)
 
-    // Send current state to the new player
-    client.send("lobby_state", {
-      players: this.state.players,
-      availableGames: this.state.availableGames,
-      lobbyId: this.roomId,
-      metadata: this.metadata,
-    })
+    try {
+      const username = options.username || `Player_${client.sessionId.substr(0, 6)}`
+      this.state.addPlayer(client.sessionId, username)
 
-    // Broadcast updated player count for discovery
-    this.broadcast("player_count_update", {
-      count: this.clients.length,
-      maxPlayers: this.maxClients,
-      timestamp: Date.now(),
-    })
+      console.log(`✅ LobbyRoom: Player ${username} (${client.sessionId}) added to state`)
+
+      // Send current state to the new player
+      client.send("lobby_state", {
+        players: Array.from(this.state.players.entries()).map(([id, player]) => ({
+          id,
+          name: player.name,
+          ready: player.ready,
+        })),
+        availableGames: Array.from(this.state.availableGames.entries()).map(([id, game]) => ({
+          id,
+          name: game.name,
+          type: game.type,
+          currentPlayers: game.currentPlayers,
+          maxPlayers: game.maxPlayers,
+        })),
+        lobbyId: this.roomId,
+        metadata: this.metadata,
+        timestamp: Date.now(),
+      })
+
+      // Send welcome message
+      client.send("lobby_welcome", {
+        message: `Welcome to ${this.metadata.name}!`,
+        playerId: client.sessionId,
+        playerName: username,
+        timestamp: Date.now(),
+      })
+
+      // Broadcast updated player count for discovery
+      this.broadcast("player_count_update", {
+        count: this.clients.length,
+        maxPlayers: this.maxClients,
+        timestamp: Date.now(),
+      })
+
+      console.log(`📊 LobbyRoom: Now has ${this.clients.length} players`)
+    } catch (error) {
+      console.error(`❌ LobbyRoom: Error in onJoin for ${client.sessionId}:`, error)
+      client.send("error", { message: "Failed to join lobby" })
+    }
   }
 
   onLeave(client: Client, consented: boolean) {
-    console.log(`Player ${client.sessionId} left the lobby`)
+    console.log(`👋 LobbyRoom: Player ${client.sessionId} left the lobby (consented: ${consented})`)
 
-    // Remove player from any games they were in
-    this.state.removePlayerFromAllGames(client.sessionId)
+    try {
+      // Remove player from any games they were in
+      this.state.removePlayerFromAllGames(client.sessionId)
 
-    // Remove player from lobby
-    this.state.removePlayer(client.sessionId)
+      // Remove player from lobby
+      const removed = this.state.removePlayer(client.sessionId)
 
-    // Broadcast updated player count
-    this.broadcast("player_count_update", {
-      count: this.clients.length,
-      maxPlayers: this.maxClients,
-      timestamp: Date.now(),
-    })
+      if (removed) {
+        console.log(`✅ LobbyRoom: Player ${client.sessionId} removed from state`)
+
+        // Broadcast player left
+        this.broadcast("player_left", {
+          playerId: client.sessionId,
+          timestamp: Date.now(),
+        })
+      }
+
+      // Broadcast updated player count
+      this.broadcast("player_count_update", {
+        count: this.clients.length,
+        maxPlayers: this.maxClients,
+        timestamp: Date.now(),
+      })
+
+      console.log(`📊 LobbyRoom: Now has ${this.clients.length} players`)
+    } catch (error) {
+      console.error(`❌ LobbyRoom: Error in onLeave for ${client.sessionId}:`, error)
+    }
   }
 
   onDispose() {
-    console.log("Lobby room disposed")
+    console.log("🏠 LobbyRoom: Room disposed")
+  }
+
+  onError(client: Client, error: any) {
+    console.error(`❌ LobbyRoom: Client ${client.sessionId} error:`, error)
   }
 }
