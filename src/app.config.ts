@@ -1,7 +1,7 @@
 import config from "@colyseus/tools"
 import { monitor } from "@colyseus/monitor"
 import { WebSocketTransport } from "@colyseus/ws-transport"
-import { matchMaker } from "colyseus"
+import { matchMaker } from "@colyseus/core"
 import { HubRoom } from "./rooms/HubRoom"
 import { LobbyRoom } from "./rooms/LobbyRoom"
 import { BattleRoom } from "./rooms/BattleRoom"
@@ -105,7 +105,7 @@ export default config({
             )
             return isJoinable
           })
-          .map((room) => ({
+          .map((room: any) => ({
             roomId: room.roomId,
             name: room.metadata?.name || `${room.name}_${room.roomId.substring(0, 8)}`,
             type: room.name,
@@ -155,7 +155,7 @@ export default config({
             try {
               const globalStats = await matchMaker.stats.fetchAll()
               debug.globalStats = globalStats
-            } catch (globalError) {
+            } catch (globalError: any) {
               debug.globalStatsError = globalError.message
             }
           }
@@ -172,12 +172,12 @@ export default config({
             const rooms = await matchMaker.query({ name: roomType })
             debug.roomQueries[roomType] = {
               count: rooms.length,
-              rooms: rooms.map((room) => ({
-                id: room.roomId,
-                name: room.name,
-                clients: room.clients,
-                maxClients: room.maxClients,
-                locked: room.locked,
+              rooms: rooms.map((r: any) => ({
+                id: r.roomId,
+                name: r.name,
+                clients: r.clients,
+                maxClients: r.maxClients,
+                locked: r.locked,
               })),
             }
           } catch (queryError: any) {
@@ -212,7 +212,7 @@ export default config({
           results.tests.queryAll = {
             success: true,
             count: allRooms.length,
-            rooms: allRooms.map((r) => ({ id: r.roomId, name: r.name, clients: r.clients })),
+            rooms: allRooms.map((r: any) => ({ id: r.roomId, name: r.name, clients: r.clients })),
           }
         } catch (error: any) {
           results.tests.queryAll = { success: false, error: error.message }
@@ -224,7 +224,7 @@ export default config({
           results.tests.queryLobby = {
             success: true,
             count: lobbyRooms.length,
-            rooms: lobbyRooms.map((r) => ({ id: r.roomId, name: r.name, clients: r.clients })),
+            rooms: lobbyRooms.map((r: any) => ({ id: r.roomId, name: r.name, clients: r.clients })),
           }
         } catch (error: any) {
           results.tests.queryLobby = { success: false, error: error.message }

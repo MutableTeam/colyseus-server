@@ -1,5 +1,4 @@
-import { Room, type Client } from "@colyseus/core"
-import { matchMaker } from "colyseus"
+import { Room, type Client, matchMaker } from "@colyseus/core"
 import { HubState } from "../schemas/HubState"
 
 export class HubRoom extends Room<HubState> {
