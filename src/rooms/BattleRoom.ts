@@ -19,7 +19,7 @@ export class BattleRoom extends Room<BattleState> {
   private collisionManager: CollisionManager = new CollisionManager()
 
   onCreate(options: any) {
-    console.log("BattleRoom created!", options)
+    console.log("🎮 BattleRoom created!", options)
 
     // Set metadata for lobby discovery
     this.setMetadata({
@@ -28,6 +28,8 @@ export class BattleRoom extends Room<BattleState> {
       mapTheme: options.mapTheme || "default",
       isPublic: !options.private,
       createdAt: Date.now(),
+      gameStarted: false,
+      gameEnded: false,
     })
 
     // Set map dimensions from options or use defaults
@@ -240,95 +242,151 @@ export class BattleRoom extends Room<BattleState> {
     console.log(`🎮 BattleRoom ${this.roomId} created and discoverable via lobby`)
   }
 
-  onJoin(client: Client, options: any) {
-    console.log(`Player ${client.sessionId} joined the battle room`)
+  async onAuth(client: Client, options: any) {
+    // Always allow authentication for now
+    // In a real implementation, you would validate the user here
+    console.log(`🔐 BattleRoom: Authenticating client ${client.sessionId} with options:`, options)
 
-    // Create a new player
-    const player = new Player()
-    player.id = client.sessionId
-    player.name = options.username || `Player_${client.sessionId.substr(0, 6)}`
-    player.characterType = options.characterType || "default"
-    player.modelType = options.modelType || player.characterType
+    // Validate required fields
+    if (!options.username || options.username.trim() === "") {
+      console.log(`❌ BattleRoom: Authentication failed - missing username`)
+      throw new Error("Username is required")
+    }
 
-    // Set initial position (random within the map)
-    const spawnPoint = this.getRandomSpawnPoint()
-    player.position.x = spawnPoint.x
-    player.position.y = spawnPoint.y
-    player.position.z = spawnPoint.z
+    // Check if room is full
+    if (this.clients.length >= this.maxClients) {
+      console.log(`❌ BattleRoom: Authentication failed - room is full (${this.clients.length}/${this.maxClients})`)
+      throw new Error("Room is full")
+    }
 
-    // Set abilities based on character type
-    player.abilities = this.abilityManager.getAbilitiesForCharacter(player.characterType)
+    // Check if game has already started (optional restriction)
+    if (this.state && this.state.gameStarted) {
+      console.log(`❌ BattleRoom: Authentication failed - game already started`)
+      throw new Error("Game already in progress")
+    }
 
-    // Add player to the game state
-    this.state.players.set(client.sessionId, player)
-
-    // Update lobby with new player count
-    this.updateLobbyMetadata()
-
-    // Broadcast new player joined
-    this.broadcast("player_joined", {
-      id: player.id,
-      name: player.name,
-      characterType: player.characterType,
-      modelType: player.modelType,
-      position: {
-        x: player.position.x,
-        y: player.position.y,
-        z: player.position.z,
-      },
-    })
-
-    // Send current ready state to the new player
-    let readyCount = 0
-    let totalPlayers = 0
-    this.state.players.forEach((player) => {
-      totalPlayers++
-      if (player.ready) readyCount++
-    })
-
-    client.send("battle_ready_update", {
-      readyCount,
-      totalPlayers,
-      allReady: readyCount === totalPlayers,
-      timestamp: Date.now(),
-    })
-
-    console.log(`📊 BattleRoom now has ${this.clients.length} players`)
+    console.log(`✅ BattleRoom: Authentication successful for ${options.username}`)
+    return true
   }
 
-  onLeave(client: Client, consented: boolean) {
-    console.log(`Player ${client.sessionId} left the battle room`)
+  onJoin(client: Client, options: any) {
+    console.log(`🚪 BattleRoom: Player ${client.sessionId} joined the battle room`)
+    console.log(`🔍 BattleRoom: Join options:`, options)
+    console.log(`📊 BattleRoom: Current players: ${this.clients.length}/${this.maxClients}`)
 
-    // Remove player from the game state
-    if (this.state.players.has(client.sessionId)) {
-      this.state.players.delete(client.sessionId)
+    try {
+      // Create a new player
+      const player = new Player()
+      player.id = client.sessionId
+      player.name = options.username || `Player_${client.sessionId.substr(0, 6)}`
+      player.characterType = options.characterType || "default"
+      player.modelType = options.modelType || player.characterType
+
+      // Set initial position (random within the map)
+      const spawnPoint = this.getRandomSpawnPoint()
+      player.position.x = spawnPoint.x
+      player.position.y = spawnPoint.y
+      player.position.z = spawnPoint.z
+
+      // Set abilities based on character type
+      player.abilities = this.abilityManager.getAbilitiesForCharacter(player.characterType)
+
+      // Add player to the game state
+      this.state.players.set(client.sessionId, player)
+
+      console.log(`✅ BattleRoom: Player ${player.name} added to game state`)
 
       // Update lobby with new player count
       this.updateLobbyMetadata()
 
-      // Broadcast player left
-      this.broadcast("player_left", { id: client.sessionId })
+      // Broadcast new player joined
+      this.broadcast("player_joined", {
+        id: player.id,
+        name: player.name,
+        characterType: player.characterType,
+        modelType: player.modelType,
+        position: {
+          x: player.position.x,
+          y: player.position.y,
+          z: player.position.z,
+        },
+      })
 
-      // Update ready count after player leaves
+      // Send current ready state to the new player
       let readyCount = 0
       let totalPlayers = 0
-      this.state.players.forEach((player: Player) => {
+      this.state.players.forEach((player) => {
         totalPlayers++
         if (player.ready) readyCount++
       })
 
-      this.broadcast("battle_ready_update", {
+      client.send("battle_ready_update", {
         readyCount,
         totalPlayers,
-        allReady: readyCount === totalPlayers && totalPlayers > 0,
+        allReady: readyCount === totalPlayers,
         timestamp: Date.now(),
       })
 
-      // Check if game should end (e.g., only one player left)
-      this.checkGameEnd()
-    }
+      // Send welcome message to the new player
+      client.send("battle_welcome", {
+        message: `Welcome to ${this.metadata.name}!`,
+        playerId: client.sessionId,
+        playerName: player.name,
+        roomId: this.roomId,
+        gameMode: this.state.gameMode,
+        mapTheme: this.state.mapTheme,
+        timestamp: Date.now(),
+      })
 
-    console.log(`📊 BattleRoom now has ${this.clients.length} players`)
+      console.log(`📊 BattleRoom now has ${this.clients.length} players`)
+    } catch (error) {
+      console.error(`❌ BattleRoom: Error in onJoin for ${client.sessionId}:`, error)
+      client.send("error", { message: "Failed to join battle room" })
+      // Disconnect the client if there was an error
+      client.leave(4006) // Room join failed
+    }
+  }
+
+  onLeave(client: Client, consented: boolean) {
+    console.log(`👋 BattleRoom: Player ${client.sessionId} left the battle room (consented: ${consented})`)
+
+    try {
+      // Remove player from the game state
+      if (this.state.players.has(client.sessionId)) {
+        const player = this.state.players.get(client.sessionId)
+        this.state.players.delete(client.sessionId)
+
+        console.log(`✅ BattleRoom: Player ${player?.name || client.sessionId} removed from game state`)
+
+        // Update lobby with new player count
+        this.updateLobbyMetadata()
+
+        // Broadcast player left
+        this.broadcast("player_left", { id: client.sessionId })
+
+        // Update ready count after player leaves
+        let readyCount = 0
+        let totalPlayers = 0
+        this.state.players.forEach((player: Player) => {
+          totalPlayers++
+          if (player.ready) readyCount++
+        })
+
+        this.broadcast("battle_ready_update", {
+          readyCount,
+          totalPlayers,
+          allReady: readyCount === totalPlayers && totalPlayers > 0,
+          timestamp: Date.now(),
+        })
+
+        // Check if game should end (e.g., only one player left)
+        this.checkGameEnd()
+      }
+
+      console.log(`📊 BattleRoom now has ${this.clients.length} players`)
+    } catch (error) {
+      console.error(`❌ BattleRoom: Error in onLeave for ${client.sessionId}:`, error)
+    }
   }
 
   private async updateLobbyMetadata() {
@@ -344,12 +402,16 @@ export class BattleRoom extends Room<BattleState> {
       // Notify lobby of the update
       updateLobby(this)
     } catch (error) {
-      console.error("Failed to update lobby metadata:", error)
+      console.error("❌ BattleRoom: Failed to update lobby metadata:", error)
     }
   }
 
   onDispose() {
-    console.log("Battle room disposed")
+    console.log("🗑️ BattleRoom: Room disposed")
+  }
+
+  onError(client: Client, error: any) {
+    console.error(`❌ BattleRoom: Client ${client.sessionId} error:`, error)
   }
 
   private update(deltaTime: number) {
