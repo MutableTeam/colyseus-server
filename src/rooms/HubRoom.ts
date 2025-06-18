@@ -212,8 +212,30 @@ export class HubRoom extends Room<HubState> {
     console.log("🏠 Hub room disposed")
   }
 
+  // CRITICAL: Enhanced authentication for Colyseus v0.15+
   async onAuth(client: Client, options: any) {
-    return true
+    console.log(`🔐 Hub: Authentication request from ${client.sessionId}`, options)
+
+    // Validate required options
+    if (!options.username || typeof options.username !== "string") {
+      console.log(`❌ Hub: Invalid username from ${client.sessionId}`)
+      throw new Error("Username is required")
+    }
+
+    // Check if room is full
+    if (this.clients.length >= this.maxClients) {
+      console.log(`❌ Hub: Room is full (${this.clients.length}/${this.maxClients})`)
+      throw new Error("Room is full")
+    }
+
+    // Additional validation for Colyseus v0.15+
+    if (options.username.length < 3 || options.username.length > 20) {
+      console.log(`❌ Hub: Username length invalid from ${client.sessionId}`)
+      throw new Error("Username must be between 3 and 20 characters")
+    }
+
+    console.log(`✅ Hub: Authentication successful for ${client.sessionId} (${options.username})`)
+    return { username: options.username, authenticated: true }
   }
 
   autoDispose = false
