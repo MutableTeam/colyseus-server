@@ -19,7 +19,7 @@ export class BattleRoom extends Room<BattleState> {
   private collisionManager: CollisionManager = new CollisionManager()
 
   onCreate(options: any) {
-    console.log("🎮 BattleRoom created!", options)
+    console.log("🎮 BattleRoom created from lobby session!", options)
 
     // Set metadata for lobby discovery
     this.setMetadata({
@@ -28,6 +28,8 @@ export class BattleRoom extends Room<BattleState> {
       mapTheme: options.mapTheme || "default",
       isPublic: !options.private,
       createdAt: Date.now(),
+      sessionId: options.sessionId, // Link to lobby session
+      lobbyRoomId: options.lobbyRoomId,
     })
 
     // Set map dimensions from options or use defaults
@@ -142,83 +144,22 @@ export class BattleRoom extends Room<BattleState> {
       })
     })
 
-    // Handle ready state - ENHANCED VERSION
-    this.onMessage("ready", (client: Client, message: any) => {
-      try {
-        console.log(`🎯 BattleRoom: Player ${client.sessionId} ready state message:`, message)
+    // Add session initialization handler
+    this.onMessage("initialize_from_session", (client: Client, message: any) => {
+      const player = this.state.players.get(client.sessionId)
+      if (!player) return
 
-        const player = this.state.players.get(client.sessionId)
-        if (!player) {
-          console.log(`❌ BattleRoom: Player ${client.sessionId} not found in state`)
-          client.send("error", { message: "Player not found in battle room" })
-          return
-        }
+      console.log(`🎯 BattleRoom: Initializing player ${client.sessionId} from session data`)
 
-        // Validate message
-        if (typeof message.ready !== "boolean") {
-          console.log(`❌ BattleRoom: Invalid ready state from ${client.sessionId}:`, message.ready)
-          client.send("error", { message: "Invalid ready state" })
-          return
-        }
-
-        // Update player ready state
-        const oldReadyState = player.ready
-        player.ready = message.ready
-
-        console.log(
-          `✅ BattleRoom: Player ${client.sessionId} (${player.name}) ready state changed from ${oldReadyState} to ${player.ready}`,
-        )
-
-        // Broadcast ready state change to all clients
-        this.broadcast("player_ready_changed", {
-          playerId: client.sessionId,
-          playerName: player.name,
-          ready: player.ready,
-          timestamp: Date.now(),
-        })
-
-        // Check if all players are ready
-        let allReady = true
-        let readyCount = 0
-        let totalPlayers = 0
-
-        this.state.players.forEach((p) => {
-          totalPlayers++
-          if (p.ready) {
-            readyCount++
-          } else {
-            allReady = false
-          }
-        })
-
-        console.log(`📊 BattleRoom: Ready status - ${readyCount}/${totalPlayers} players ready`)
-
-        // Broadcast ready count update
-        this.broadcast("battle_ready_update", {
-          readyCount,
-          totalPlayers,
-          allReady,
-          timestamp: Date.now(),
-        })
-
-        // If all players are ready and we have at least 2 players, start countdown
-        if (allReady && totalPlayers >= 2 && !this.state.gameStarted) {
-          console.log(`🎉 BattleRoom: All ${totalPlayers} players are ready! Starting game...`)
-          this.broadcast("all_players_ready", {
-            playerCount: totalPlayers,
-            readyCount,
-            timestamp: Date.now(),
-          })
-
-          // Start the game after a short delay
-          this.clock.setTimeout(() => {
-            this.startGame()
-          }, 3000) // 3 second countdown
-        }
-      } catch (error) {
-        console.error(`❌ BattleRoom: Error handling ready message from ${client.sessionId}:`, error)
-        client.send("error", { message: "Failed to process ready state" })
+      // Apply session data to player
+      if (message.playerData) {
+        player.name = message.playerData.name || player.name
+        player.characterType = message.playerData.characterType || player.characterType
+        player.ready = true // Players are already ready from lobby
       }
+
+      // Check if all expected players have joined and initialized
+      this.checkAllPlayersInitialized()
     })
 
     // Add test message handler for debugging
@@ -237,7 +178,7 @@ export class BattleRoom extends Room<BattleState> {
       client.send("pong", { timestamp: Date.now() })
     })
 
-    console.log(`🎮 BattleRoom ${this.roomId} created and discoverable via lobby`)
+    console.log(`🎮 BattleRoom ${this.roomId} created and ready for session players`)
   }
 
   async onAuth(client: Client, options: any) {
@@ -266,7 +207,7 @@ export class BattleRoom extends Room<BattleState> {
   }
 
   onJoin(client: Client, options: any) {
-    console.log(`🚪 Player ${client.sessionId} (${options.username}) joined the battle room`)
+    console.log(`🚪 Player ${client.sessionId} (${options.username}) joined battle room from session`)
 
     // Create a new player
     const player = new Player()
@@ -303,20 +244,28 @@ export class BattleRoom extends Room<BattleState> {
       },
     })
 
-    // Send current ready state to the new player
-    let readyCount = 0
-    let totalPlayers = 0
-    this.state.players.forEach((player) => {
-      totalPlayers++
-      if (player.ready) readyCount++
-    })
+    // Set player as ready immediately (they were ready in lobby)
+    player.ready = true
 
-    client.send("battle_ready_update", {
-      readyCount,
-      totalPlayers,
-      allReady: readyCount === totalPlayers,
+    // Send initialization message to client
+    client.send("battle_room_joined", {
+      roomId: this.roomId,
+      sessionId: this.metadata.sessionId,
+      playerData: {
+        id: player.id,
+        name: player.name,
+        characterType: player.characterType,
+        position: {
+          x: player.position.x,
+          y: player.position.y,
+          z: player.position.z,
+        },
+      },
       timestamp: Date.now(),
     })
+
+    // Check if we can start the game
+    this.checkAllPlayersInitialized()
 
     console.log(`📊 BattleRoom now has ${this.clients.length} players`)
   }
@@ -766,6 +715,31 @@ export class BattleRoom extends Room<BattleState> {
       wall.scale.z = Math.random() * 20 + 10
       wall.rotation = Math.random() * Math.PI * 2
       this.state.mapObjects.push(wall)
+    }
+  }
+
+  private checkAllPlayersInitialized() {
+    // Check if all players are ready (they should be from lobby)
+    let allReady = true
+    let playerCount = 0
+
+    this.state.players.forEach((player) => {
+      playerCount++
+      if (!player.ready) {
+        allReady = false
+      }
+    })
+
+    console.log(`📊 BattleRoom: ${playerCount} players initialized, all ready: ${allReady}`)
+
+    // Start game immediately since players are pre-ready from lobby
+    if (allReady && playerCount >= 2 && !this.state.gameStarted) {
+      console.log(`🚀 BattleRoom: All session players ready, starting game immediately`)
+
+      // Short delay for client synchronization
+      this.clock.setTimeout(() => {
+        this.startGame()
+      }, 2000) // 2 second delay for smooth transition
     }
   }
 
