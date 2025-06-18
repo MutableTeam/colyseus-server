@@ -153,7 +153,8 @@ export class LobbyRoom extends Room<LobbyState> {
           console.log(`🎉 LobbyRoom Session ${session.id}: All players ready! Creating battle room...`)
           this.createBattleRoomAndTransition(session)
         }
-      } catch (error) {
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
         console.error(`❌ LobbyRoom: Error handling ready message from ${client.sessionId}:`, error)
         client.send("error", { message: "Failed to process ready state" })
       }
@@ -298,12 +299,12 @@ export class LobbyRoom extends Room<LobbyState> {
         lobbyRoomId: this.roomId,
       }
 
-      // Create the battle room
-      const battleRoom = await matchMaker.create("battle", battleRoomOptions)
-      session.battleRoomId = battleRoom.roomId
+      // Create the battle room - Fixed: Use proper SeatReservation type
+      const seatReservation = await matchMaker.create("battle", battleRoomOptions)
+      session.battleRoomId = seatReservation.room.roomId
       session.status = "started"
 
-      console.log(`✅ Battle room created: ${battleRoom.roomId}`)
+      console.log(`✅ Battle room created: ${seatReservation.room.roomId}`)
 
       // Prepare player data for transition
       const playersData: any[] = []
@@ -321,7 +322,7 @@ export class LobbyRoom extends Room<LobbyState> {
         const client = this.clients.find((c) => c.sessionId === player.id)
         if (client) {
           client.send("transition_to_battle", {
-            battleRoomId: battleRoom.roomId,
+            battleRoomId: seatReservation.room.roomId,
             sessionId: session.id,
             playersData,
             battleRoomOptions,
@@ -333,7 +334,7 @@ export class LobbyRoom extends Room<LobbyState> {
       // Broadcast to all lobby clients that session started
       this.broadcast("session_started", {
         sessionId: session.id,
-        battleRoomId: battleRoom.roomId,
+        battleRoomId: seatReservation.room.roomId,
         playersData,
         timestamp: Date.now(),
       })
@@ -342,7 +343,8 @@ export class LobbyRoom extends Room<LobbyState> {
       this.clock.setTimeout(() => {
         this.cleanupCompletedSession(session.id)
       }, 30000) // 30 seconds to transition
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
       console.error(`❌ Failed to create battle room for session ${session.id}:`, error)
 
       // Reset session status on failure
@@ -357,7 +359,7 @@ export class LobbyRoom extends Room<LobbyState> {
         if (client) {
           client.send("battle_room_creation_failed", {
             sessionId: session.id,
-            error: error.message,
+            error: errorMessage,
             timestamp: Date.now(),
           })
         }
@@ -454,7 +456,8 @@ export class LobbyRoom extends Room<LobbyState> {
       })
 
       console.log(`📊 LobbyRoom: Now has ${this.clients.length} players`)
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
       console.error(`❌ LobbyRoom: Error in onJoin for ${client.sessionId}:`, error)
       client.send("error", { message: "Failed to join lobby" })
     }
@@ -478,7 +481,8 @@ export class LobbyRoom extends Room<LobbyState> {
       }
 
       console.log(`📊 LobbyRoom: Now has ${this.clients.length} players`)
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
       console.error(`❌ LobbyRoom: Error in onLeave for ${client.sessionId}:`, error)
     }
   }
