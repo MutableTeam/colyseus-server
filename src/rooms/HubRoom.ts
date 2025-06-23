@@ -191,7 +191,10 @@ export class HubRoom extends Room<HubState> {
         joinTime: Date.now(),
       }
     } catch (error) {
-      console.error(`❌ HubRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      console.error(
+        `❌ HubRoom: Authentication failed for ${client.sessionId}:`,
+        error instanceof Error ? error.message : String(error),
+      )
       throw error
     }
   }

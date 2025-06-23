@@ -226,7 +226,10 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         joinTime: Date.now(),
       }
     } catch (error) {
-      console.error(`❌ CustomLobbyRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      console.error(
+        `❌ CustomLobbyRoom: Authentication failed for ${client.sessionId}:`,
+        error instanceof Error ? error.message : String(error),
+      )
       throw error
     }
   }

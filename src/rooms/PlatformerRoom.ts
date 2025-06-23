@@ -130,7 +130,10 @@ export class PlatformerRoom extends Room<PlatformerState> {
         joinTime: Date.now(),
       }
     } catch (error) {
-      console.error(`❌ PlatformerRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      console.error(
+        `❌ PlatformerRoom: Authentication failed for ${client.sessionId}:`,
+        error instanceof Error ? error.message : String(error),
+      )
       throw error
     }
   }

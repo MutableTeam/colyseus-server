@@ -97,7 +97,10 @@ export class RaceRoom extends Room<RaceState> {
         joinTime: Date.now(),
       }
     } catch (error) {
-      console.error(`❌ RaceRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      console.error(
+        `❌ RaceRoom: Authentication failed for ${client.sessionId}:`,
+        error instanceof Error ? error.message : String(error),
+      )
       throw error
     }
   }
