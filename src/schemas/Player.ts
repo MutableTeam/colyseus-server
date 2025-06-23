@@ -25,7 +25,7 @@ export class Player extends Schema {
   @type("number") health = 100
   @type("number") maxHealth = 100
   @type("number") kills = 0
-  @type("boolean") ready = false
+  // REMOVED: ready field - only exists in lobby, not in battle room
   @type("boolean") isRespawning = false
   @type("number") respawnTime = 3 // seconds
 

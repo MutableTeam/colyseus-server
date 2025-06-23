@@ -149,7 +149,9 @@ export class BattleRoom extends Room<BattleState> {
       client.send("pong", { timestamp: Date.now() })
     })
 
-    // Auto-start game if players came from lobby (already ready)
+    // REMOVED: All ready-related message handlers - readiness is handled in lobby only
+
+    // Auto-start game immediately if players came from lobby (already ready)
     if (options.fromLobby && options.preReadyPlayers) {
       console.log(`🎮 BattleRoom: Auto-starting game for pre-ready players from lobby`)
       this.clock.setTimeout(() => {
@@ -204,10 +206,10 @@ export class BattleRoom extends Room<BattleState> {
     // Set abilities based on character type
     player.abilities = this.abilityManager.getAbilitiesForCharacter(player.characterType)
 
-    // Players from lobby are automatically ready
+    // REMOVED: No ready state handling in battle room - players are automatically ready when they join from lobby
+    // Players from lobby are considered ready to play immediately
     if (options.fromLobby) {
-      player.ready = true
-      console.log(`✅ Player ${client.sessionId} auto-ready (from lobby)`)
+      console.log(`✅ Player ${client.sessionId} joined from lobby - ready to play`)
     }
 
     // Add player to the game state
@@ -230,20 +232,20 @@ export class BattleRoom extends Room<BattleState> {
     })
 
     // Send current battle room state to the new player
-    const playersArray: Array<{ id: string; name: string; ready: boolean }> = []
+    const playersArray: Array<{ id: string; name: string }> = []
     this.state.players.forEach((p: Player, id: string) => {
       playersArray.push({
         id: id,
         name: p.name,
-        ready: p.ready,
       })
     })
 
-    client.send("battle_room_state", {
+    client.send("battle_room_joined", {
       players: playersArray,
       battleRoomId: this.roomId,
       gameMode: this.state.gameMode,
       playerCount: playersArray.length,
+      gameStarted: this.state.gameStarted,
       timestamp: Date.now(),
     })
 
@@ -268,22 +270,6 @@ export class BattleRoom extends Room<BattleState> {
 
       // Broadcast player left
       this.broadcast("player_left", { id: client.sessionId })
-
-      // Update ready count after player leaves
-      let readyCount = 0
-      let totalPlayers = 0
-
-      this.state.players.forEach((player: Player) => {
-        totalPlayers++
-        if (player.ready) readyCount++
-      })
-
-      this.broadcast("battle_ready_update", {
-        readyCount,
-        totalPlayers,
-        allReady: readyCount === totalPlayers && totalPlayers > 0,
-        timestamp: Date.now(),
-      })
 
       // Check if game should end (e.g., only one player left)
       this.checkGameEnd()
@@ -705,26 +691,7 @@ export class BattleRoom extends Room<BattleState> {
     }
   }
 
-  private checkGameStart() {
-    // Don't start if already started
-    if (this.state.gameStarted) return
-
-    // Check if all players are ready
-    let allReady = true
-    let playerCount = 0
-
-    this.state.players.forEach((player) => {
-      playerCount++
-      if (!player.ready) {
-        allReady = false
-      }
-    })
-
-    // Need at least 2 players and all must be ready
-    if (playerCount >= 2 && allReady) {
-      this.startGame()
-    }
-  }
+  // REMOVED: checkGameStart() - No ready system in battle room
 
   private startGame() {
     this.state.gameStarted = true
