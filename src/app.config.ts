@@ -6,7 +6,7 @@ import { HubRoom } from "./rooms/HubRoom"
 import { BattleRoom } from "./rooms/BattleRoom"
 import { RaceRoom } from "./rooms/RaceRoom"
 import { PlatformerRoom } from "./rooms/PlatformerRoom"
-import { CustomLobbyRoom } from "./rooms/CustomLobbyRoom"
+import { LobbyRoom } from "./rooms/LobbyRoom"
 
 const app = config({
   initializeTransport: (options) =>
@@ -24,7 +24,7 @@ const app = config({
     })
 
     // Register the custom lobby room for readiness system
-    gameServer.define("lobby", CustomLobbyRoom, {
+    gameServer.define("lobby", LobbyRoom, {
       maxClients: 50,
     })
 
