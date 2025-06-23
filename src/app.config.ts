@@ -18,25 +18,46 @@ export default config({
 
   initializeGameServer: (gameServer) => {
     // Register the hub room first - this is the main entry point
-    gameServer.define("hub", HubRoom)
+    // Explicitly set maxClients to ensure it's not overridden
+    gameServer.define("hub", HubRoom, {
+      maxClients: 200,
+    })
 
     // Register the custom lobby room for readiness system
-    gameServer.define("lobby", CustomLobbyRoom)
+    gameServer.define("lobby", CustomLobbyRoom, {
+      maxClients: 50,
+    })
 
     // Register game-specific rooms with real-time listing enabled
-    gameServer.define("battle", BattleRoom).enableRealtimeListing()
+    gameServer
+      .define("battle", BattleRoom, {
+        maxClients: 16,
+      })
+      .enableRealtimeListing()
 
-    gameServer.define("race", RaceRoom).enableRealtimeListing()
+    gameServer
+      .define("race", RaceRoom, {
+        maxClients: 8,
+      })
+      .enableRealtimeListing()
 
-    gameServer.define("platformer", PlatformerRoom).enableRealtimeListing()
+    gameServer
+      .define("platformer", PlatformerRoom, {
+        maxClients: 4,
+      })
+      .enableRealtimeListing()
 
     gameServer.onShutdown(() => {
       console.log("🛑 Game server shutting down...")
     })
 
     console.log("🎮 Game server initialized with room definitions")
+    console.log("🏠 Hub room: maxClients = 200")
+    console.log("🏛️ Lobby room: maxClients = 50")
+    console.log("⚔️ Battle room: maxClients = 16")
+    console.log("🏁 Race room: maxClients = 8")
+    console.log("🎮 Platformer room: maxClients = 4")
     console.log("🔄 Real-time listing enabled for game rooms")
-    console.log("🏠 Using built-in LobbyRoom for room discovery")
   },
 
   initializeExpress: (app) => {
@@ -224,25 +245,37 @@ export default config({
           results.tests.queryAll = { success: false, error: error.message }
         }
 
-        // Test 2: Query lobby rooms specifically
+        // Test 2: Query hub rooms specifically
         try {
-          const lobbyRooms = await matchMaker.query({ name: "lobby" })
-          results.tests.queryLobby = {
+          const hubRooms = await matchMaker.query({ name: "hub" })
+          results.tests.queryHub = {
             success: true,
-            count: lobbyRooms.length,
-            rooms: lobbyRooms.map((r: any) => ({ id: r.roomId, name: r.name, clients: r.clients })),
+            count: hubRooms.length,
+            rooms: hubRooms.map((r: any) => ({
+              id: r.roomId,
+              name: r.name,
+              clients: r.clients,
+              maxClients: r.maxClients,
+              locked: r.locked,
+            })),
           }
         } catch (error: any) {
-          results.tests.queryLobby = { success: false, error: error.message }
+          results.tests.queryHub = { success: false, error: error.message }
         }
 
-        // Test 3: Find one available lobby room
+        // Test 3: Find one available hub room
         try {
-          const availableRoom = await matchMaker.findOneRoomAvailable("lobby", {})
+          const availableRoom = await matchMaker.findOneRoomAvailable("hub", {})
           results.tests.findOneAvailable = {
             success: true,
             room: availableRoom
-              ? { id: availableRoom.roomId, name: availableRoom.name, clients: availableRoom.clients }
+              ? {
+                  id: availableRoom.roomId,
+                  name: availableRoom.name,
+                  clients: availableRoom.clients,
+                  maxClients: availableRoom.maxClients,
+                  locked: availableRoom.locked,
+                }
               : null,
           }
         } catch (error: any) {
@@ -285,8 +318,8 @@ export default config({
 
   beforeListen: () => {
     console.log("🎮 Colyseus server starting...")
-    console.log("🏠 Hub room will be the main entry point for all players")
-    console.log("🏛️ Using built-in LobbyRoom for automatic room discovery")
+    console.log("🏠 Hub room will be the main entry point for all players (maxClients: 200)")
+    console.log("🏛️ Using built-in LobbyRoom for automatic room discovery (maxClients: 50)")
     console.log("📡 API endpoints available:")
     console.log("   GET /api/hub - Get hub status")
     console.log("   GET /api/rooms - Get available rooms (using matchMaker.query)")
