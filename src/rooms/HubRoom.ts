@@ -164,15 +164,15 @@ export class HubRoom extends Room<HubState> {
 
     const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
 
-    // Add player to state and update total count
-    this.state.addPlayer(client.sessionId, username)
+    // Add player to state and get updated total count
+    const totalPlayers = this.state.addPlayer(client.sessionId, username)
 
-    console.log(`📊 Hub player count after join: ${this.state.totalPlayers}`)
+    console.log(`📊 Hub player count after join: ${totalPlayers}`)
 
     // Send welcome message with hub status
     client.send("hub_welcome", {
       message: "Welcome to the game hub!",
-      totalPlayers: this.state.totalPlayers,
+      totalPlayers: totalPlayers,
       serverStatus: this.state.serverStatus,
       availableLobbies: this.state.getAllAvailableLobbies(),
       timestamp: Date.now(),
@@ -180,28 +180,35 @@ export class HubRoom extends Room<HubState> {
 
     // Broadcast player count update to all clients
     this.broadcast("player_count_update", {
-      totalPlayers: this.state.totalPlayers,
+      totalPlayers: totalPlayers,
       timestamp: Date.now(),
     })
 
-    console.log(`📊 Hub now has ${this.state.totalPlayers} players`)
+    // Also send current state to the new client
+    client.send("hub_state_update", {
+      totalPlayers: totalPlayers,
+      serverStatus: this.state.serverStatus,
+      timestamp: Date.now(),
+    })
+
+    console.log(`📊 Hub now has ${totalPlayers} players`)
   }
 
   onLeave(client: Client, consented: boolean) {
     console.log(`👋 Player ${client.sessionId} left the hub`)
 
-    // Remove player from state and update total count
-    this.state.removePlayer(client.sessionId)
+    // Remove player from state and get updated total count
+    const result = this.state.removePlayer(client.sessionId)
 
-    console.log(`📊 Hub player count after leave: ${this.state.totalPlayers}`)
+    console.log(`📊 Hub player count after leave: ${result.totalPlayers}`)
 
     // Broadcast player count update to remaining clients
     this.broadcast("player_count_update", {
-      totalPlayers: this.state.totalPlayers,
+      totalPlayers: result.totalPlayers,
       timestamp: Date.now(),
     })
 
-    console.log(`📊 Hub now has ${this.state.totalPlayers} players`)
+    console.log(`📊 Hub now has ${result.totalPlayers} players`)
   }
 
   onDispose() {
@@ -212,30 +219,8 @@ export class HubRoom extends Room<HubState> {
     console.log("🏠 Hub room disposed")
   }
 
-  // CRITICAL: Enhanced authentication for Colyseus v0.15+
   async onAuth(client: Client, options: any) {
-    console.log(`🔐 Hub: Authentication request from ${client.sessionId}`, options)
-
-    // Validate required options
-    if (!options.username || typeof options.username !== "string") {
-      console.log(`❌ Hub: Invalid username from ${client.sessionId}`)
-      throw new Error("Username is required")
-    }
-
-    // Check if room is full
-    if (this.clients.length >= this.maxClients) {
-      console.log(`❌ Hub: Room is full (${this.clients.length}/${this.maxClients})`)
-      throw new Error("Room is full")
-    }
-
-    // Additional validation for Colyseus v0.15+
-    if (options.username.length < 3 || options.username.length > 20) {
-      console.log(`❌ Hub: Username length invalid from ${client.sessionId}`)
-      throw new Error("Username must be between 3 and 20 characters")
-    }
-
-    console.log(`✅ Hub: Authentication successful for ${client.sessionId} (${options.username})`)
-    return { username: options.username, authenticated: true }
+    return true
   }
 
   autoDispose = false

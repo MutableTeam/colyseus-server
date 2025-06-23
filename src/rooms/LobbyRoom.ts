@@ -1,11 +1,12 @@
-import { Room, type Client, matchMaker } from "@colyseus/core"
-import { LobbyState, type GameSession } from "../schemas/LobbyState"
+import { Room, type Client } from "@colyseus/core"
+import { LobbyState } from "../schemas/LobbyState"
 
 export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
+  private gameSession: GameSession | null = null
 
   onCreate(options: any) {
-    console.log("🏠 LobbyRoom created with ready-up system!", options)
+    console.log("🏠 LobbyRoom created!", options)
 
     // Set metadata to help with room discovery
     this.setMetadata({
@@ -17,166 +18,6 @@ export class LobbyRoom extends Room<LobbyState> {
 
     // Initialize the room state
     this.setState(new LobbyState())
-
-    // Handle creating a game session (ready-up group)
-    this.onMessage("create_game_session", (client: Client, message: any) => {
-      const { gameType, sessionName, maxPlayers } = message
-      console.log(`🎮 Player ${client.sessionId} creating game session: ${sessionName} (${gameType})`)
-
-      const sessionId = `${gameType}_session_${Date.now()}`
-      const session = this.state.createGameSession(sessionId, gameType, sessionName, maxPlayers || 16, client.sessionId)
-
-      // Broadcast new session created
-      this.broadcast("game_session_created", {
-        sessionId,
-        gameType,
-        sessionName,
-        maxPlayers,
-        creatorId: client.sessionId,
-        timestamp: Date.now(),
-      })
-
-      // Send confirmation to creator
-      client.send("session_created", {
-        sessionId,
-        session: this.serializeSession(session),
-      })
-    })
-
-    // Handle joining a game session
-    this.onMessage("join_game_session", (client: Client, message: any) => {
-      const { sessionId } = message
-      console.log(`🎯 Player ${client.sessionId} joining game session: ${sessionId}`)
-
-      const success = this.state.joinGameSession(sessionId, client.sessionId)
-
-      if (success) {
-        const session = this.state.gameSessions.get(sessionId)
-
-        // Broadcast player joined session
-        this.broadcast("player_joined_session", {
-          sessionId,
-          playerId: client.sessionId,
-          playerName: this.state.players.get(client.sessionId)?.name,
-          currentPlayers: session?.currentPlayers,
-          timestamp: Date.now(),
-        })
-
-        client.send("session_joined", {
-          sessionId,
-          session: session ? this.serializeSession(session) : null,
-        })
-      } else {
-        client.send("session_join_failed", {
-          sessionId,
-          reason: "Session full or not available",
-        })
-      }
-    })
-
-    // Handle leaving a game session
-    this.onMessage("leave_game_session", (client: Client, message: any) => {
-      const { sessionId } = message
-      console.log(`🚪 Player ${client.sessionId} leaving game session: ${sessionId}`)
-
-      const success = this.state.leaveGameSession(sessionId, client.sessionId)
-
-      if (success) {
-        this.broadcast("player_left_session", {
-          sessionId,
-          playerId: client.sessionId,
-          timestamp: Date.now(),
-        })
-      }
-    })
-
-    // Handle ready state changes - MAIN READY-UP LOGIC
-    this.onMessage("ready", (client: Client, message: any) => {
-      try {
-        console.log(`🎯 LobbyRoom: Player ${client.sessionId} ready state message:`, message)
-
-        const player = this.state.players.get(client.sessionId)
-        if (!player) {
-          console.log(`❌ LobbyRoom: Player ${client.sessionId} not found in state`)
-          client.send("error", { message: "Player not found in lobby" })
-          return
-        }
-
-        // Validate message
-        if (typeof message.ready !== "boolean") {
-          console.log(`❌ LobbyRoom: Invalid ready state from ${client.sessionId}:`, message.ready)
-          client.send("error", { message: "Invalid ready state" })
-          return
-        }
-
-        // Update player ready state and get their session
-        const session = this.state.setPlayerReady(client.sessionId, message.ready)
-
-        if (!session) {
-          client.send("error", { message: "Player not in any game session" })
-          return
-        }
-
-        console.log(`✅ LobbyRoom: Player ${client.sessionId} (${player.name}) ready state: ${message.ready}`)
-
-        // Broadcast ready state change to all clients
-        this.broadcast("player_ready_changed", {
-          playerId: client.sessionId,
-          playerName: player.name,
-          ready: message.ready,
-          sessionId: session.id,
-          timestamp: Date.now(),
-        })
-
-        // Check if all players in session are ready
-        let readyCount = 0
-        let totalPlayers = 0
-
-        session.players.forEach((p) => {
-          totalPlayers++
-          if (p.ready) readyCount++
-        })
-
-        console.log(`📊 LobbyRoom Session ${session.id}: ${readyCount}/${totalPlayers} players ready`)
-
-        // Broadcast session ready update
-        this.broadcast("session_ready_update", {
-          sessionId: session.id,
-          readyCount,
-          totalPlayers,
-          allReady: session.allReady,
-          timestamp: Date.now(),
-        })
-
-        // If all players are ready, create battle room and transition
-        if (session.allReady && session.status === "ready") {
-          console.log(`🎉 LobbyRoom Session ${session.id}: All players ready! Creating battle room...`)
-          this.createBattleRoomAndTransition(session)
-        }
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
-        console.error(`❌ LobbyRoom: Error handling ready message from ${client.sessionId}:`, error)
-        client.send("error", { message: "Failed to process ready state" })
-      }
-    })
-
-    // Handle getting available sessions
-    this.onMessage("get_game_sessions", (client: Client, message: any) => {
-      const { gameType } = message
-      const sessions: any[] = []
-
-      this.state.gameSessions.forEach((session) => {
-        if (!gameType || session.gameType === gameType) {
-          sessions.push(this.serializeSession(session))
-        }
-      })
-
-      client.send("game_sessions", {
-        sessions,
-        gameType: gameType || "all",
-        timestamp: Date.now(),
-      })
-    })
 
     // Handle player joining a game
     this.onMessage("join_game", (client: Client, message: any) => {
@@ -243,6 +84,63 @@ export class LobbyRoom extends Room<LobbyState> {
       console.log(`Sent ${activeLobbies.length} active lobbies to player ${client.sessionId}`)
     })
 
+    // Handle player ready state - NEW READY SYSTEM
+    this.onMessage("ready", (client: Client, message: any) => {
+      try {
+        console.log(`🎯 LobbyRoom: Player ${client.sessionId} ready state message:`, message)
+
+        const player = this.state.players.get(client.sessionId)
+        if (!player) {
+          console.log(`❌ LobbyRoom: Player ${client.sessionId} not found in state`)
+          client.send("error", { message: "Player not found in lobby" })
+          return
+        }
+
+        // Validate message
+        if (typeof message.ready !== "boolean") {
+          console.log(`❌ LobbyRoom: Invalid ready state from ${client.sessionId}:`, message.ready)
+          client.send("error", { message: "Invalid ready state" })
+          return
+        }
+
+        // Update player ready state
+        const oldReadyState = player.ready
+        player.ready = message.ready
+
+        console.log(
+          `✅ LobbyRoom: Player ${client.sessionId} ready state changed from ${oldReadyState} to ${player.ready}`,
+        )
+
+        // Broadcast ready state change to all clients
+        this.broadcast("player_ready_changed", {
+          playerId: client.sessionId,
+          playerName: player.name,
+          ready: player.ready,
+          timestamp: Date.now(),
+        })
+
+        // Check if all players are ready
+        this.checkAndStartGameSession()
+      } catch (error) {
+        console.error(`❌ LobbyRoom: Error handling ready message from ${client.sessionId}:`, error)
+        client.send("error", { message: "Failed to process ready state" })
+      }
+    })
+
+    // Handle game type selection for ready sessions
+    this.onMessage("select_game_type", (client: Client, message: any) => {
+      const { gameType } = message
+      console.log(`🎮 Player ${client.sessionId} selected game type: ${gameType}`)
+
+      // Start or join a game session for this game type
+      this.joinOrCreateGameSession(client, gameType)
+    })
+
+    // Handle leaving game session
+    this.onMessage("leave_game_session", (client: Client) => {
+      this.removePlayerFromGameSession(client.sessionId)
+    })
+
     // Add test message handler for debugging
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`🧪 LobbyRoom: Test message received from ${client.sessionId}:`, message)
@@ -264,11 +162,6 @@ export class LobbyRoom extends Room<LobbyState> {
       this.state.cleanupStaleGames()
     }, 30000) // Check every 30 seconds
 
-    // Set up periodic cleanup of stale sessions
-    this.setSimulationInterval(() => {
-      this.cleanupStaleSessions()
-    }, 30000) // Check every 30 seconds
-
     // Broadcast room presence for discovery
     this.broadcast("lobby_available", {
       id: this.roomId,
@@ -279,139 +172,6 @@ export class LobbyRoom extends Room<LobbyState> {
     })
 
     console.log(`🏠 LobbyRoom ${this.roomId} is now discoverable with metadata:`, this.metadata)
-    console.log(`🏠 LobbyRoom ${this.roomId} ready with game session management`)
-  }
-
-  private async createBattleRoomAndTransition(session: GameSession) {
-    try {
-      console.log(`🚀 Creating battle room for session ${session.id}`)
-
-      // Update session status
-      session.status = "starting"
-
-      // Prepare battle room options
-      const battleRoomOptions = {
-        roomName: session.sessionName,
-        gameMode: "deathmatch",
-        mapTheme: "default",
-        maxPlayers: session.maxPlayers,
-        sessionId: session.id,
-        lobbyRoomId: this.roomId,
-      }
-
-      // Create the battle room - Fixed: Use proper SeatReservation type
-      const seatReservation = await matchMaker.create("battle", battleRoomOptions)
-      session.battleRoomId = seatReservation.room.roomId
-      session.status = "started"
-
-      console.log(`✅ Battle room created: ${seatReservation.room.roomId}`)
-
-      // Prepare player data for transition
-      const playersData: any[] = []
-      session.players.forEach((player) => {
-        playersData.push({
-          id: player.id,
-          name: player.name,
-          characterType: player.characterType,
-          ready: player.ready,
-        })
-      })
-
-      // Notify all players in the session to transition to battle room
-      session.players.forEach((player) => {
-        const client = this.clients.find((c) => c.sessionId === player.id)
-        if (client) {
-          client.send("transition_to_battle", {
-            battleRoomId: seatReservation.room.roomId,
-            sessionId: session.id,
-            playersData,
-            battleRoomOptions,
-            timestamp: Date.now(),
-          })
-        }
-      })
-
-      // Broadcast to all lobby clients that session started
-      this.broadcast("session_started", {
-        sessionId: session.id,
-        battleRoomId: seatReservation.room.roomId,
-        playersData,
-        timestamp: Date.now(),
-      })
-
-      // Schedule session cleanup after players have transitioned
-      this.clock.setTimeout(() => {
-        this.cleanupCompletedSession(session.id)
-      }, 30000) // 30 seconds to transition
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
-      console.error(`❌ Failed to create battle room for session ${session.id}:`, error)
-
-      // Reset session status on failure
-      session.status = "waiting"
-      session.players.forEach((player) => {
-        player.ready = false
-      })
-
-      // Notify players of failure
-      session.players.forEach((player) => {
-        const client = this.clients.find((c) => c.sessionId === player.id)
-        if (client) {
-          client.send("battle_room_creation_failed", {
-            sessionId: session.id,
-            error: errorMessage,
-            timestamp: Date.now(),
-          })
-        }
-      })
-    }
-  }
-
-  private serializeSession(session: GameSession) {
-    const playersArray: any[] = []
-    session.players.forEach((player) => {
-      playersArray.push({
-        id: player.id,
-        name: player.name,
-        characterType: player.characterType,
-        ready: player.ready,
-        joinedAt: player.joinedAt,
-      })
-    })
-
-    return {
-      id: session.id,
-      gameType: session.gameType,
-      sessionName: session.sessionName,
-      maxPlayers: session.maxPlayers,
-      currentPlayers: session.currentPlayers,
-      allReady: session.allReady,
-      status: session.status,
-      createdAt: session.createdAt,
-      battleRoomId: session.battleRoomId,
-      players: playersArray,
-    }
-  }
-
-  private cleanupStaleSessions() {
-    const now = Date.now()
-    const staleThreshold = 30 * 60 * 1000 // 30 minutes
-
-    this.state.gameSessions.forEach((session, sessionId) => {
-      if (
-        now - session.createdAt > staleThreshold ||
-        (session.status === "started" && now - session.createdAt > 5 * 60 * 1000)
-      ) {
-        // 5 min for started sessions
-        console.log(`🧹 Cleaning up stale session: ${sessionId}`)
-        this.state.gameSessions.delete(sessionId)
-      }
-    })
-  }
-
-  private cleanupCompletedSession(sessionId: string) {
-    console.log(`🧹 Cleaning up completed session: ${sessionId}`)
-    this.state.gameSessions.delete(sessionId)
   }
 
   onJoin(client: Client, options: any) {
@@ -424,50 +184,261 @@ export class LobbyRoom extends Room<LobbyState> {
       console.log(`✅ LobbyRoom: Player ${username} (${client.sessionId}) added to state`)
 
       // Send current state to the new player
-      const playersArray: Array<{ id: string; name: string; ready: boolean; selectedGameType: string }> = []
+      const playersArray: Array<{ id: string; name: string; ready: boolean }> = []
       this.state.players.forEach((player, id) => {
         playersArray.push({
           id: id,
           name: player.name,
           ready: player.ready,
-          selectedGameType: player.selectedGameType,
         })
       })
 
-      const sessionsArray: any[] = []
-      this.state.gameSessions.forEach((session) => {
-        sessionsArray.push(this.serializeSession(session))
+      const gamesArray: Array<{ id: string; name: string; type: string; currentPlayers: number; maxPlayers: number }> =
+        []
+      this.state.availableGames.forEach((game, id) => {
+        gamesArray.push({
+          id: id,
+          name: game.name,
+          type: game.type,
+          currentPlayers: game.currentPlayers,
+          maxPlayers: game.maxPlayers,
+        })
       })
 
+      // Send comprehensive lobby state
       client.send("lobby_state", {
         players: playersArray,
-        gameSessions: sessionsArray,
+        availableGames: gamesArray,
         lobbyId: this.roomId,
         metadata: this.metadata,
+        playerCount: playersArray.length,
         timestamp: Date.now(),
       })
 
       // Send welcome message
       client.send("lobby_welcome", {
-        message: `Welcome to ${this.metadata.name}! Join a game session to ready up.`,
+        message: `Welcome to ${this.metadata.name}!`,
         playerId: client.sessionId,
         playerName: username,
+        playerCount: playersArray.length,
         timestamp: Date.now(),
       })
 
-      console.log(`📊 LobbyRoom: Now has ${this.clients.length} players`)
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+      // Broadcast updated player count for discovery
+      this.broadcast("player_count_update", {
+        count: this.clients.length,
+        maxPlayers: this.maxClients,
+        playerCount: playersArray.length,
+        timestamp: Date.now(),
+      })
+
+      // Broadcast lobby stats update
+      this.broadcast("lobby_stats_update", {
+        totalPlayers: playersArray.length,
+        availableGames: gamesArray.length,
+        timestamp: Date.now(),
+      })
+
+      console.log(`📊 LobbyRoom: Now has ${this.clients.length} clients, ${playersArray.length} players`)
+    } catch (error) {
       console.error(`❌ LobbyRoom: Error in onJoin for ${client.sessionId}:`, error)
       client.send("error", { message: "Failed to join lobby" })
     }
+  }
+
+  private checkAndStartGameSession() {
+    if (!this.gameSession) return
+
+    let allReady = true
+    let readyCount = 0
+    const totalPlayers = this.gameSession.players.size
+
+    this.gameSession.players.forEach((playerId) => {
+      const player = this.state.players.get(playerId)
+      if (player) {
+        if (player.ready) {
+          readyCount++
+        } else {
+          allReady = false
+        }
+      }
+    })
+
+    console.log(`📊 LobbyRoom Game Session: Ready status - ${readyCount}/${totalPlayers} players ready`)
+
+    // Broadcast ready count update with more detailed info
+    this.broadcast("lobby_ready_update", {
+      readyCount,
+      totalPlayers,
+      allReady,
+      gameType: this.gameSession.gameType,
+      sessionPlayers: Array.from(this.gameSession.players),
+      timestamp: Date.now(),
+    })
+
+    // Also broadcast general lobby stats
+    this.broadcast("lobby_stats_update", {
+      totalPlayers: this.state.players.size,
+      readyPlayers: readyCount,
+      gameSessionActive: true,
+      timestamp: Date.now(),
+    })
+
+    // If all players are ready and we have minimum players, create battle room
+    if (allReady && totalPlayers >= 2) {
+      console.log(`🎉 LobbyRoom: All ${totalPlayers} players are ready! Creating battle room...`)
+      this.createBattleRoomForSession()
+    }
+  }
+
+  private async createBattleRoomForSession() {
+    if (!this.gameSession) return
+
+    try {
+      console.log(`🎮 Creating battle room for ${this.gameSession.players.size} players`)
+
+      // Create battle room with ready players
+      const battleRoomOptions = {
+        roomName: `Battle ${Date.now().toString().substring(8)}`,
+        gameMode: "deathmatch",
+        mapTheme: "default",
+        maxPlayers: 16,
+        lobbyId: this.roomId,
+        preReadyPlayers: Array.from(this.gameSession.players),
+      }
+
+      // Notify all session players that battle room is being created
+      this.gameSession.players.forEach((playerId) => {
+        const client = this.clients.find((c) => c.sessionId === playerId)
+        if (client) {
+          client.send("battle_room_creating", {
+            message: "Battle room is being created...",
+            gameType: this.gameSession.gameType,
+            playerCount: this.gameSession.players.size,
+            timestamp: Date.now(),
+          })
+        }
+      })
+
+      // Use matchMaker to create the battle room
+      const battleRoom = await this.presence.hset(
+        "battle_rooms",
+        `battle_${Date.now()}`,
+        JSON.stringify(battleRoomOptions),
+      )
+
+      // Send battle room connection info to all ready players
+      this.gameSession.players.forEach((playerId) => {
+        const client = this.clients.find((c) => c.sessionId === playerId)
+        const player = this.state.players.get(playerId)
+        if (client && player) {
+          client.send("join_battle_room", {
+            gameType: "battle",
+            options: {
+              username: player.name,
+              fromLobby: true,
+              lobbyId: this.roomId,
+            },
+            timestamp: Date.now(),
+          })
+        }
+      })
+
+      // Clear the game session
+      this.gameSession = null
+
+      console.log(`✅ Battle room creation initiated for ready players`)
+    } catch (error) {
+      console.error(`❌ Failed to create battle room:`, error)
+
+      // Notify players of the error
+      if (this.gameSession) {
+        this.gameSession.players.forEach((playerId) => {
+          const client = this.clients.find((c) => c.sessionId === playerId)
+          if (client) {
+            client.send("error", {
+              message: "Failed to create battle room. Please try again.",
+              timestamp: Date.now(),
+            })
+          }
+        })
+      }
+    }
+  }
+
+  private joinOrCreateGameSession(client: Client, gameType: string) {
+    // Create new game session if none exists
+    if (!this.gameSession) {
+      this.gameSession = new GameSession(gameType)
+      console.log(`🎮 Created new game session for ${gameType}`)
+    }
+
+    // Add player to session
+    this.gameSession.players.add(client.sessionId)
+
+    // Reset player ready state when joining session
+    const player = this.state.players.get(client.sessionId)
+    if (player) {
+      player.ready = false
+    }
+
+    console.log(`🎯 Player ${client.sessionId} joined game session (${this.gameSession.players.size} players)`)
+
+    // Broadcast session update
+    this.broadcast("game_session_update", {
+      gameType: this.gameSession.gameType,
+      playerCount: this.gameSession.players.size,
+      players: Array.from(this.gameSession.players),
+      timestamp: Date.now(),
+    })
+
+    // Send confirmation to client
+    client.send("joined_game_session", {
+      gameType: gameType,
+      playerCount: this.gameSession.players.size,
+      timestamp: Date.now(),
+    })
+  }
+
+  private removePlayerFromGameSession(playerId: string) {
+    if (!this.gameSession) return
+
+    this.gameSession.players.delete(playerId)
+
+    // Reset player ready state
+    const player = this.state.players.get(playerId)
+    if (player) {
+      player.ready = false
+    }
+
+    console.log(`🚪 Player ${playerId} left game session (${this.gameSession.players.size} players remaining)`)
+
+    // Remove session if empty
+    if (this.gameSession.players.size === 0) {
+      this.gameSession = null
+      console.log(`🗑️ Game session removed (no players remaining)`)
+    }
+
+    // Broadcast session update
+    this.broadcast("game_session_update", {
+      gameType: this.gameSession?.gameType || null,
+      playerCount: this.gameSession?.players.size || 0,
+      players: this.gameSession ? Array.from(this.gameSession.players) : [],
+      timestamp: Date.now(),
+    })
   }
 
   onLeave(client: Client, consented: boolean) {
     console.log(`👋 LobbyRoom: Player ${client.sessionId} left the lobby (consented: ${consented})`)
 
     try {
-      // Remove player from lobby and any sessions
+      // Remove from game session if in one
+      this.removePlayerFromGameSession(client.sessionId)
+
+      // Remove player from any games they were in
+      this.state.removePlayerFromAllGames(client.sessionId)
+
+      // Remove player from lobby
       const removed = this.state.removePlayer(client.sessionId)
 
       if (removed) {
@@ -480,9 +451,15 @@ export class LobbyRoom extends Room<LobbyState> {
         })
       }
 
+      // Broadcast updated player count
+      this.broadcast("player_count_update", {
+        count: this.clients.length,
+        maxPlayers: this.maxClients,
+        timestamp: Date.now(),
+      })
+
       console.log(`📊 LobbyRoom: Now has ${this.clients.length} players`)
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+    } catch (error) {
       console.error(`❌ LobbyRoom: Error in onLeave for ${client.sessionId}:`, error)
     }
   }
@@ -493,5 +470,17 @@ export class LobbyRoom extends Room<LobbyState> {
 
   onError(client: Client, error: any) {
     console.error(`❌ LobbyRoom: Client ${client.sessionId} error:`, error)
+  }
+}
+
+class GameSession {
+  public gameType: string
+  public players: Set<string>
+  public createdAt: number
+
+  constructor(gameType: string) {
+    this.gameType = gameType
+    this.players = new Set()
+    this.createdAt = Date.now()
   }
 }

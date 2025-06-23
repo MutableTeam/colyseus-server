@@ -33,12 +33,22 @@ export class HubState extends Schema {
     this.players.set(sessionId, player)
     this.totalPlayers = this.players.size
     this.lastUpdate = Date.now()
+
+    console.log(`🔄 HubState: Added player ${username}, total players now: ${this.totalPlayers}`)
+
+    // Return the updated count for immediate broadcasting
+    return this.totalPlayers
   }
 
   removePlayer(sessionId: string) {
-    this.players.delete(sessionId)
+    const removed = this.players.delete(sessionId)
     this.totalPlayers = this.players.size
     this.lastUpdate = Date.now()
+
+    console.log(`🔄 HubState: Removed player ${sessionId}, total players now: ${this.totalPlayers}`)
+
+    // Return the updated count for immediate broadcasting
+    return { removed, totalPlayers: this.totalPlayers }
   }
 
   getAllAvailableLobbies() {
