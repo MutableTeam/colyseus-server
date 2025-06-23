@@ -1,15 +1,9 @@
 import { Room, type Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
 
-interface GameSession {
-  gameType: string
-  players: Set<string>
-  createdAt: number
-}
-
 export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
-  private gameSession: GameSession | undefined
+  private gameSession: any = null
 
   onCreate(options: any) {
     console.log("🏠 LobbyRoom created!", options)
@@ -191,7 +185,7 @@ export class LobbyRoom extends Room<LobbyState> {
 
       // Send current state to the new player
       const playersArray: Array<{ id: string; name: string; ready: boolean }> = []
-      this.state.players.forEach((player, id) => {
+      this.state.players.forEach((player: any, id: string) => {
         playersArray.push({
           id: id,
           name: player.name,
@@ -201,7 +195,7 @@ export class LobbyRoom extends Room<LobbyState> {
 
       const gamesArray: Array<{ id: string; name: string; type: string; currentPlayers: number; maxPlayers: number }> =
         []
-      this.state.availableGames.forEach((game, id) => {
+      this.state.availableGames.forEach((game: any, id: string) => {
         gamesArray.push({
           id: id,
           name: game.name,
@@ -259,7 +253,7 @@ export class LobbyRoom extends Room<LobbyState> {
     let readyCount = 0
     const totalPlayers = this.gameSession.players.size
 
-    this.gameSession.players.forEach((playerId) => {
+    this.gameSession.players.forEach((playerId: string) => {
       const player = this.state.players.get(playerId)
       if (player) {
         if (player.ready) {
@@ -314,7 +308,7 @@ export class LobbyRoom extends Room<LobbyState> {
       }
 
       // Notify all session players that battle room is being created
-      this.gameSession.players.forEach((playerId) => {
+      this.gameSession.players.forEach((playerId: string) => {
         const client = this.clients.find((c) => c.sessionId === playerId)
         if (client) {
           client.send("battle_room_creating", {
@@ -334,7 +328,7 @@ export class LobbyRoom extends Room<LobbyState> {
       )
 
       // Send battle room connection info to all ready players
-      this.gameSession.players.forEach((playerId) => {
+      this.gameSession.players.forEach((playerId: string) => {
         const client = this.clients.find((c) => c.sessionId === playerId)
         const player = this.state.players.get(playerId)
         if (client && player) {
@@ -351,7 +345,7 @@ export class LobbyRoom extends Room<LobbyState> {
       })
 
       // Clear the game session
-      this.gameSession = undefined
+      this.gameSession = null
 
       console.log(`✅ Battle room creation initiated for ready players`)
     } catch (error) {
@@ -359,7 +353,7 @@ export class LobbyRoom extends Room<LobbyState> {
 
       // Notify players of the error
       if (this.gameSession) {
-        this.gameSession.players.forEach((playerId) => {
+        this.gameSession.players.forEach((playerId: string) => {
           const client = this.clients.find((c) => c.sessionId === playerId)
           if (client) {
             client.send("error", {
@@ -377,7 +371,7 @@ export class LobbyRoom extends Room<LobbyState> {
     if (!this.gameSession) {
       this.gameSession = {
         gameType: gameType,
-        players: new Set<string>(),
+        players: new Set(),
         createdAt: Date.now(),
       }
       console.log(`🎮 Created new game session for ${gameType}`)
@@ -411,16 +405,11 @@ export class LobbyRoom extends Room<LobbyState> {
   }
 
   private removePlayerFromGameSession(playerId: string) {
-    // Early return if no session exists
-    if (this.gameSession === undefined) {
+    if (!this.gameSession) {
       return
     }
 
-    // Store session reference to avoid undefined access
-    const session = this.gameSession
-
-    // Remove player from session
-    session.players.delete(playerId)
+    this.gameSession.players.delete(playerId)
 
     // Reset player ready state
     const player = this.state.players.get(playerId)
@@ -428,12 +417,11 @@ export class LobbyRoom extends Room<LobbyState> {
       player.ready = false
     }
 
-    const remainingPlayers = session.players.size
-    console.log(`🚪 Player ${playerId} left game session (${remainingPlayers} players remaining)`)
+    console.log(`🚪 Player ${playerId} left game session (${this.gameSession.players.size} players remaining)`)
 
-    // Handle empty session case
-    if (remainingPlayers === 0) {
-      this.gameSession = undefined
+    // Remove session if empty
+    if (this.gameSession.players.size === 0) {
+      this.gameSession = null
       console.log(`🗑️ Game session removed (no players remaining)`)
 
       this.broadcast("game_session_update", {
@@ -442,15 +430,16 @@ export class LobbyRoom extends Room<LobbyState> {
         players: [],
         timestamp: Date.now(),
       })
-    } else {
-      // Use stored session reference for broadcast
-      this.broadcast("game_session_update", {
-        gameType: session.gameType,
-        playerCount: session.players.size,
-        players: Array.from(session.players),
-        timestamp: Date.now(),
-      })
+      return
     }
+
+    // Broadcast session update for active session
+    this.broadcast("game_session_update", {
+      gameType: this.gameSession.gameType,
+      playerCount: this.gameSession.players.size,
+      players: Array.from(this.gameSession.players),
+      timestamp: Date.now(),
+    })
   }
 
   onLeave(client: Client, consented: boolean) {
