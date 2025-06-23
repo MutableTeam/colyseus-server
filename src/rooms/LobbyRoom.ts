@@ -411,11 +411,16 @@ export class LobbyRoom extends Room<LobbyState> {
   }
 
   private removePlayerFromGameSession(playerId: string) {
-    if (!this.gameSession) {
+    // Early return if no session exists
+    if (this.gameSession === undefined) {
       return
     }
 
-    this.gameSession.players.delete(playerId)
+    // Store session reference to avoid undefined access
+    const session = this.gameSession
+
+    // Remove player from session
+    session.players.delete(playerId)
 
     // Reset player ready state
     const player = this.state.players.get(playerId)
@@ -423,10 +428,11 @@ export class LobbyRoom extends Room<LobbyState> {
       player.ready = false
     }
 
-    console.log(`🚪 Player ${playerId} left game session (${this.gameSession.players.size} players remaining)`)
+    const remainingPlayers = session.players.size
+    console.log(`🚪 Player ${playerId} left game session (${remainingPlayers} players remaining)`)
 
-    // Remove session if empty
-    if (this.gameSession.players.size === 0) {
+    // Handle empty session case
+    if (remainingPlayers === 0) {
       this.gameSession = undefined
       console.log(`🗑️ Game session removed (no players remaining)`)
 
@@ -437,10 +443,11 @@ export class LobbyRoom extends Room<LobbyState> {
         timestamp: Date.now(),
       })
     } else {
+      // Use stored session reference for broadcast
       this.broadcast("game_session_update", {
-        gameType: this.gameSession.gameType,
-        playerCount: this.gameSession.players.size,
-        players: Array.from(this.gameSession.players),
+        gameType: session.gameType,
+        playerCount: session.players.size,
+        players: Array.from(session.players),
         timestamp: Date.now(),
       })
     }
