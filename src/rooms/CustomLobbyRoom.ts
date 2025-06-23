@@ -195,53 +195,74 @@ export class CustomLobbyRoom extends Room<LobbyState> {
   }
 
   async onAuth(client: Client, options: any) {
-    console.log(`🔐 CustomLobbyRoom: Authentication request from ${client.sessionId}`, options)
+    console.log(`🔐 CustomLobbyRoom: Authentication attempt from ${client.sessionId}`)
+    console.log(`🔍 Auth options received:`, JSON.stringify(options, null, 2))
+    console.log(`📊 Current room status: ${this.clients.length}/${this.maxClients} clients`)
 
     try {
-      // Validate options
+      // Validate basic options structure
       if (!options || typeof options !== "object") {
-        console.log(`❌ CustomLobbyRoom: Invalid options from ${client.sessionId}`)
-        throw new Error("Invalid authentication options")
+        console.log(`⚠️ CustomLobbyRoom: Invalid or missing options, creating default for ${client.sessionId}`)
+        options = {}
       }
 
-      // Very permissive authentication for lobby
-      if (!options.username || typeof options.username !== "string" || options.username.trim() === "") {
-        console.log(`⚠️ CustomLobbyRoom: No valid username provided, using default for ${client.sessionId}`)
-        options.username = `Player_${client.sessionId.substring(0, 6)}`
+      // PUBLIC SERVER: Very permissive username handling
+      let username = options.username
+      if (!username || typeof username !== "string" || username.trim() === "") {
+        username = `Player_${client.sessionId.substring(0, 6)}`
+        console.log(`🔧 CustomLobbyRoom: Generated default username: ${username}`)
+      } else {
+        // Sanitize but keep original intent
+        username = username.trim().substring(0, 20)
+        // Remove potentially problematic characters but keep it readable
+        username = username.replace(/[<>"'&]/g, "_")
+        console.log(`🔧 CustomLobbyRoom: Sanitized username: ${username}`)
       }
 
-      // Sanitize username
-      options.username = options.username.trim().substring(0, 20)
+      // FIXED: Check capacity properly - don't count current client as it's not in clients array yet during onAuth
+      const currentClientCount = this.clients.length
+      console.log(`📊 CustomLobbyRoom: Capacity check - ${currentClientCount} current clients, max ${this.maxClients}`)
 
-      // Check room capacity AFTER validation
-      if (this.clients.length >= this.maxClients) {
-        console.log(`❌ CustomLobbyRoom: Room is full (${this.clients.length}/${this.maxClients})`)
-        throw new Error("Lobby is full")
+      if (currentClientCount >= this.maxClients) {
+        console.log(`❌ CustomLobbyRoom: Room is full (${currentClientCount}/${this.maxClients})`)
+        throw new Error("Lobby is full - please try again later")
       }
 
-      console.log(`✅ CustomLobbyRoom: Authentication successful for ${client.sessionId} (${options.username})`)
-      return {
-        username: options.username,
+      // Create authentication result
+      const authResult = {
+        username: username,
         authenticated: true,
         joinTime: Date.now(),
+        playerType: "lobby_player",
+        sessionId: client.sessionId,
       }
+
+      console.log(`✅ CustomLobbyRoom: Authentication SUCCESS for ${client.sessionId}`)
+      console.log(`👤 User: ${username}`)
+      console.log(`📊 Room will have: ${currentClientCount + 1}/${this.maxClients} clients after join`)
+
+      return authResult
     } catch (error) {
-      console.error(
-        `❌ CustomLobbyRoom: Authentication failed for ${client.sessionId}:`,
-        error instanceof Error ? error.message : String(error),
-      )
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error(`❌ CustomLobbyRoom: Authentication FAILED for ${client.sessionId}: ${errorMessage}`)
+      console.error(`🔍 Failed auth options:`, JSON.stringify(options, null, 2))
       throw error
     }
   }
 
   onJoin(client: Client, options: any) {
-    console.log(`🚪 LobbyRoom: Player ${client.sessionId} (${options.username}) joined the lobby`)
+    console.log(
+      `🚪 CustomLobbyRoom: Player ${client.sessionId} joining with options:`,
+      JSON.stringify(options, null, 2),
+    )
 
     try {
       const username = options.username || `Player_${client.sessionId.substr(0, 6)}`
+
+      console.log(`🔧 Adding player ${username} (${client.sessionId}) to lobby state...`)
       this.state.addPlayer(client.sessionId, username)
 
-      console.log(`✅ LobbyRoom: Player ${username} (${client.sessionId}) added to state`)
+      console.log(`✅ LobbyRoom: Player ${username} (${client.sessionId}) added to state successfully`)
 
       // Send current state to the new player
       const playersArray: Array<{ id: string; name: string; ready: boolean }> = []
@@ -306,7 +327,8 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         this.broadcastLobbyStats()
       }, 500)
     } catch (error) {
-      console.error(`❌ LobbyRoom: Error in onJoin for ${client.sessionId}:`, error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error(`❌ LobbyRoom: Error in onJoin for ${client.sessionId}: ${errorMessage}`)
       client.send("error", { message: "Failed to join lobby" })
     }
   }
@@ -408,6 +430,8 @@ export class CustomLobbyRoom extends Room<LobbyState> {
               fromLobby: true, // CRITICAL: Mark as from lobby
               lobbyId: this.roomId,
               characterType: "default",
+              playerType: "battle_player",
+              timestamp: Date.now(),
             },
             timestamp: Date.now(),
           })
@@ -554,7 +578,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
   }
 
   onLeave(client: Client, consented: boolean) {
-    console.log(`👋 LobbyRoom: Player ${client.sessionId} left the lobby (consented: ${consented})`)
+    console.log(`👋 CustomLobbyRoom: Player ${client.sessionId} left the lobby (consented: ${consented})`)
 
     try {
       // Remove from game session if in one
@@ -586,18 +610,18 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       // Broadcast updated lobby stats
       this.broadcastLobbyStats()
 
-      console.log(`📊 LobbyRoom: Now has ${this.clients.length} players`)
+      console.log(`📊 CustomLobbyRoom: Now has ${this.clients.length} players`)
     } catch (error) {
-      console.error(`❌ LobbyRoom: Error in onLeave for ${client.sessionId}:`, error)
+      console.error(`❌ CustomLobbyRoom: Error in onLeave for ${client.sessionId}:`, error)
     }
   }
 
   onDispose() {
-    console.log("🏛️ LobbyRoom: Room disposed")
+    console.log("🏛️ CustomLobbyRoom: Room disposed")
   }
 
   onError(client: Client, error: any) {
-    console.error(`❌ LobbyRoom: Client ${client.sessionId} error:`, error)
+    console.error(`❌ CustomLobbyRoom: Client ${client.sessionId} error:`, error)
   }
 
   // Disable auto-dispose to keep lobby persistent
