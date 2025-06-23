@@ -194,8 +194,27 @@ export class LobbyRoom extends Room<LobbyState> {
     console.log(`🏛️ LobbyRoom ${this.roomId} is now discoverable with readiness system active`)
   }
 
+  async onAuth(client: Client, options: any) {
+    console.log(`🔐 LobbyRoom: Authentication request from ${client.sessionId}`, options)
+
+    // Very permissive authentication for lobby
+    if (!options.username || typeof options.username !== "string") {
+      console.log(`⚠️ LobbyRoom: No username provided, using default for ${client.sessionId}`)
+      options.username = `Player_${client.sessionId.substring(0, 6)}`
+    }
+
+    // Check room capacity
+    if (this.clients.length >= this.maxClients) {
+      console.log(`❌ LobbyRoom: Room is full (${this.clients.length}/${this.maxClients})`)
+      throw new Error("Lobby is full")
+    }
+
+    console.log(`✅ LobbyRoom: Authentication successful for ${client.sessionId} (${options.username})`)
+    return { username: options.username }
+  }
+
   onJoin(client: Client, options: any) {
-    console.log(`🚪 LobbyRoom: Player ${client.sessionId} joined the lobby`)
+    console.log(`🚪 LobbyRoom: Player ${client.sessionId} (${options.username}) joined the lobby`)
 
     try {
       const username = options.username || `Player_${client.sessionId.substr(0, 6)}`
@@ -559,4 +578,7 @@ export class LobbyRoom extends Room<LobbyState> {
   onError(client: Client, error: any) {
     console.error(`❌ LobbyRoom: Client ${client.sessionId} error:`, error)
   }
+
+  // Disable auto-dispose to keep lobby persistent
+  autoDispose = false
 }
