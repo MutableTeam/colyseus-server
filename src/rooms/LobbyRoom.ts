@@ -400,17 +400,14 @@ export class LobbyRoom extends Room<LobbyState> {
     })
   }
 
-  private removePlayerFromGameSession(playerId: string) {
+  private removePlayerFromGameSession(playerId: string): void {
     // Early return if no game session exists
-    if (!this.gameSession) {
+    if (this.gameSession === null) {
       return
     }
 
-    // Store reference to current session before any modifications
-    const currentSession = this.gameSession
-
     // Remove player from session
-    currentSession.players.delete(playerId)
+    this.gameSession.players.delete(playerId)
 
     // Reset player ready state
     const player = this.state.players.get(playerId)
@@ -418,10 +415,11 @@ export class LobbyRoom extends Room<LobbyState> {
       player.ready = false
     }
 
-    console.log(`🚪 Player ${playerId} left game session (${currentSession.players.size} players remaining)`)
+    const remainingPlayers = this.gameSession.players.size
+    console.log(`🚪 Player ${playerId} left game session (${remainingPlayers} players remaining)`)
 
-    // Check if session should be removed
-    if (currentSession.players.size === 0) {
+    // Handle empty session case
+    if (remainingPlayers === 0) {
       this.gameSession = null
       console.log(`🗑️ Game session removed (no players remaining)`)
 
@@ -432,15 +430,17 @@ export class LobbyRoom extends Room<LobbyState> {
         players: [],
         timestamp: Date.now(),
       })
-    } else {
-      // Broadcast session update for active session using stored reference
-      this.broadcast("game_session_update", {
-        gameType: currentSession.gameType,
-        playerCount: currentSession.players.size,
-        players: Array.from(currentSession.players),
-        timestamp: Date.now(),
-      })
+      return
     }
+
+    // At this point, gameSession is guaranteed to be non-null and have players
+    const session = this.gameSession!
+    this.broadcast("game_session_update", {
+      gameType: session.gameType,
+      playerCount: session.players.size,
+      players: Array.from(session.players),
+      timestamp: Date.now(),
+    })
   }
 
   onLeave(client: Client, consented: boolean) {
