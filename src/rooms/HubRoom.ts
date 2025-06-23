@@ -228,7 +228,7 @@ export class HubRoom extends Room<HubState> {
   onDispose() {
     console.log(`🏠 HubRoom ${this.roomId}: DISPOSING...`)
     if (this.lobbyUpdateInterval) {
-      this.clearSimulationInterval(this.lobbyUpdateInterval)
+      clearInterval(this.lobbyUpdateInterval)
       this.lobbyUpdateInterval = null
     }
     console.log(`🏠 HubRoom ${this.roomId}: DISPOSED.`)
