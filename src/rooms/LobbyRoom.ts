@@ -401,9 +401,16 @@ export class LobbyRoom extends Room<LobbyState> {
   }
 
   private removePlayerFromGameSession(playerId: string) {
-    if (!this.gameSession) return
+    // Early return if no game session exists
+    if (!this.gameSession) {
+      return
+    }
 
-    this.gameSession.players.delete(playerId)
+    // Store reference to current session before any modifications
+    const currentSession = this.gameSession
+
+    // Remove player from session
+    currentSession.players.delete(playerId)
 
     // Reset player ready state
     const player = this.state.players.get(playerId)
@@ -411,10 +418,10 @@ export class LobbyRoom extends Room<LobbyState> {
       player.ready = false
     }
 
-    console.log(`🚪 Player ${playerId} left game session (${this.gameSession.players.size} players remaining)`)
+    console.log(`🚪 Player ${playerId} left game session (${currentSession.players.size} players remaining)`)
 
-    // Remove session if empty
-    if (this.gameSession.players.size === 0) {
+    // Check if session should be removed
+    if (currentSession.players.size === 0) {
       this.gameSession = null
       console.log(`🗑️ Game session removed (no players remaining)`)
 
@@ -425,16 +432,15 @@ export class LobbyRoom extends Room<LobbyState> {
         players: [],
         timestamp: Date.now(),
       })
-      return
+    } else {
+      // Broadcast session update for active session using stored reference
+      this.broadcast("game_session_update", {
+        gameType: currentSession.gameType,
+        playerCount: currentSession.players.size,
+        players: Array.from(currentSession.players),
+        timestamp: Date.now(),
+      })
     }
-
-    // Broadcast session update for active session - Fixed null check
-    this.broadcast("game_session_update", {
-      gameType: this.gameSession.gameType,
-      playerCount: this.gameSession.players.size,
-      players: Array.from(this.gameSession.players),
-      timestamp: Date.now(),
-    })
   }
 
   onLeave(client: Client, consented: boolean) {
