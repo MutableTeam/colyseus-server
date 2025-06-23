@@ -3,10 +3,10 @@ import { monitor } from "@colyseus/monitor"
 import { WebSocketTransport } from "@colyseus/ws-transport"
 import { matchMaker } from "@colyseus/core"
 import { HubRoom } from "./rooms/HubRoom"
-import { LobbyRoom } from "./rooms/LobbyRoom"
 import { BattleRoom } from "./rooms/BattleRoom"
 import { RaceRoom } from "./rooms/RaceRoom"
 import { PlatformerRoom } from "./rooms/PlatformerRoom"
+import { CustomLobbyRoom } from "./rooms/CustomLobbyRoom"
 
 export default config({
   initializeTransport: (options) =>
@@ -20,8 +20,8 @@ export default config({
     // Register the hub room first - this is the main entry point
     gameServer.define("hub", HubRoom)
 
-    // Register the built-in LobbyRoom
-    gameServer.define("lobby", LobbyRoom)
+    // Register the custom lobby room for readiness system
+    gameServer.define("lobby", CustomLobbyRoom)
 
     // Register game-specific rooms with real-time listing enabled
     gameServer.define("battle", BattleRoom).enableRealtimeListing()
@@ -36,6 +36,7 @@ export default config({
 
     console.log("🎮 Game server initialized with room definitions")
     console.log("🔄 Real-time listing enabled for game rooms")
+    console.log("🏠 Using built-in LobbyRoom for room discovery")
   },
 
   initializeExpress: (app) => {
@@ -285,6 +286,7 @@ export default config({
   beforeListen: () => {
     console.log("🎮 Colyseus server starting...")
     console.log("🏠 Hub room will be the main entry point for all players")
+    console.log("🏛️ Using built-in LobbyRoom for automatic room discovery")
     console.log("📡 API endpoints available:")
     console.log("   GET /api/hub - Get hub status")
     console.log("   GET /api/rooms - Get available rooms (using matchMaker.query)")
@@ -294,6 +296,6 @@ export default config({
     console.log("📡 Standard Colyseus endpoints:")
     console.log("   GET /matchmake/hub - Get available hub rooms")
     console.log("   POST /matchmake/joinOrCreate/hub - Join the main hub")
-    console.log("   POST /matchmake/joinOrCreate/lobby - Join game lobbies")
+    console.log("   POST /matchmake/joinOrCreate/lobby - Join the built-in lobby for room discovery")
   },
 })

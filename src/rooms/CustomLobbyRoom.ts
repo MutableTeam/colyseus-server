@@ -1,12 +1,12 @@
 import { Room, type Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
 
-export class LobbyRoom extends Room<LobbyState> {
+export class CustomLobbyRoom extends Room<LobbyState> {
   maxClients = 50
   private gameSession: any = null
 
   onCreate(options: any) {
-    console.log("🏛️ LobbyRoom created - Readiness system active!", options)
+    console.log("🏛️ CustomLobbyRoom created - Readiness system active!", options)
 
     // Set metadata to help with room discovery
     this.setMetadata({
@@ -195,22 +195,40 @@ export class LobbyRoom extends Room<LobbyState> {
   }
 
   async onAuth(client: Client, options: any) {
-    console.log(`🔐 LobbyRoom: Authentication request from ${client.sessionId}`, options)
+    console.log(`🔐 CustomLobbyRoom: Authentication request from ${client.sessionId}`, options)
 
-    // Very permissive authentication for lobby
-    if (!options.username || typeof options.username !== "string") {
-      console.log(`⚠️ LobbyRoom: No username provided, using default for ${client.sessionId}`)
-      options.username = `Player_${client.sessionId.substring(0, 6)}`
+    try {
+      // Validate options
+      if (!options || typeof options !== "object") {
+        console.log(`❌ CustomLobbyRoom: Invalid options from ${client.sessionId}`)
+        throw new Error("Invalid authentication options")
+      }
+
+      // Very permissive authentication for lobby
+      if (!options.username || typeof options.username !== "string" || options.username.trim() === "") {
+        console.log(`⚠️ CustomLobbyRoom: No valid username provided, using default for ${client.sessionId}`)
+        options.username = `Player_${client.sessionId.substring(0, 6)}`
+      }
+
+      // Sanitize username
+      options.username = options.username.trim().substring(0, 20)
+
+      // Check room capacity AFTER validation
+      if (this.clients.length >= this.maxClients) {
+        console.log(`❌ CustomLobbyRoom: Room is full (${this.clients.length}/${this.maxClients})`)
+        throw new Error("Lobby is full")
+      }
+
+      console.log(`✅ CustomLobbyRoom: Authentication successful for ${client.sessionId} (${options.username})`)
+      return {
+        username: options.username,
+        authenticated: true,
+        joinTime: Date.now(),
+      }
+    } catch (error) {
+      console.error(`❌ CustomLobbyRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      throw error
     }
-
-    // Check room capacity
-    if (this.clients.length >= this.maxClients) {
-      console.log(`❌ LobbyRoom: Room is full (${this.clients.length}/${this.maxClients})`)
-      throw new Error("Lobby is full")
-    }
-
-    console.log(`✅ LobbyRoom: Authentication successful for ${client.sessionId} (${options.username})`)
-    return { username: options.username }
   }
 
   onJoin(client: Client, options: any) {

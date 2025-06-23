@@ -162,20 +162,38 @@ export class HubRoom extends Room<HubState> {
   async onAuth(client: Client, options: any) {
     console.log(`🔐 HubRoom: Authentication request from ${client.sessionId}`, options)
 
-    // Very permissive authentication for hub
-    if (!options.username || typeof options.username !== "string") {
-      console.log(`⚠️ HubRoom: No username provided, using default for ${client.sessionId}`)
-      options.username = `Player_${client.sessionId.substring(0, 6)}`
-    }
+    try {
+      // Validate options
+      if (!options || typeof options !== "object") {
+        console.log(`❌ HubRoom: Invalid options from ${client.sessionId}`)
+        throw new Error("Invalid authentication options")
+      }
 
-    // Check room capacity
-    if (this.clients.length >= this.maxClients) {
-      console.log(`❌ HubRoom: Room is full (${this.clients.length}/${this.maxClients})`)
-      throw new Error("Hub is full")
-    }
+      // Very permissive authentication for hub
+      if (!options.username || typeof options.username !== "string" || options.username.trim() === "") {
+        console.log(`⚠️ HubRoom: No valid username provided, using default for ${client.sessionId}`)
+        options.username = `Player_${client.sessionId.substring(0, 6)}`
+      }
 
-    console.log(`✅ HubRoom: Authentication successful for ${client.sessionId} (${options.username})`)
-    return { username: options.username }
+      // Sanitize username
+      options.username = options.username.trim().substring(0, 20)
+
+      // Check room capacity AFTER validation
+      if (this.clients.length >= this.maxClients) {
+        console.log(`❌ HubRoom: Room is full (${this.clients.length}/${this.maxClients})`)
+        throw new Error("Hub is full")
+      }
+
+      console.log(`✅ HubRoom: Authentication successful for ${client.sessionId} (${options.username})`)
+      return {
+        username: options.username,
+        authenticated: true,
+        joinTime: Date.now(),
+      }
+    } catch (error) {
+      console.error(`❌ HubRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      throw error
+    }
   }
 
   onJoin(client: Client, options: any) {

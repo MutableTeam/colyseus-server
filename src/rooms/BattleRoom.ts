@@ -165,26 +165,45 @@ export class BattleRoom extends Room<BattleState> {
   async onAuth(client: Client, options: any) {
     console.log(`🔐 BattleRoom: Authentication request from ${client.sessionId}`, options)
 
-    // Validate required options
-    if (!options.username || typeof options.username !== "string") {
-      console.log(`❌ BattleRoom: Invalid username from ${client.sessionId}`)
-      throw new Error("Username is required")
-    }
+    try {
+      // Validate options
+      if (!options || typeof options !== "object") {
+        console.log(`❌ BattleRoom: Invalid options from ${client.sessionId}`)
+        throw new Error("Invalid authentication options")
+      }
 
-    // More lenient capacity check for lobby-created rooms
-    if (this.clients.length >= this.maxClients) {
-      console.log(`❌ BattleRoom: Room is full (${this.clients.length}/${this.maxClients})`)
-      throw new Error("Room is full")
-    }
+      // Validate required options
+      if (!options.username || typeof options.username !== "string" || options.username.trim() === "") {
+        console.log(`❌ BattleRoom: Invalid username from ${client.sessionId}`)
+        throw new Error("Username is required")
+      }
 
-    // Allow joining if game hasn't started or if coming from lobby
-    if (this.state.gameStarted && !options.fromLobby) {
-      console.log(`❌ BattleRoom: Game already started, cannot join`)
-      throw new Error("Game already started")
-    }
+      // Sanitize username
+      options.username = options.username.trim().substring(0, 20)
 
-    console.log(`✅ BattleRoom: Authentication successful for ${client.sessionId} (${options.username})`)
-    return { username: options.username, fromLobby: options.fromLobby || false }
+      // More lenient capacity check for lobby-created rooms
+      if (this.clients.length >= this.maxClients) {
+        console.log(`❌ BattleRoom: Room is full (${this.clients.length}/${this.maxClients})`)
+        throw new Error("Room is full")
+      }
+
+      // Allow joining if game hasn't started or if coming from lobby
+      if (this.state.gameStarted && !options.fromLobby) {
+        console.log(`❌ BattleRoom: Game already started, cannot join`)
+        throw new Error("Game already started")
+      }
+
+      console.log(`✅ BattleRoom: Authentication successful for ${client.sessionId} (${options.username})`)
+      return {
+        username: options.username,
+        fromLobby: options.fromLobby || false,
+        authenticated: true,
+        joinTime: Date.now(),
+      }
+    } catch (error) {
+      console.error(`❌ BattleRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      throw error
+    }
   }
 
   onJoin(client: Client, options: any) {

@@ -91,6 +91,50 @@ export class PlatformerRoom extends Room<PlatformerState> {
     })
   }
 
+  async onAuth(client: Client, options: any) {
+    console.log(`🔐 PlatformerRoom: Authentication request from ${client.sessionId}`, options)
+
+    try {
+      // Validate options
+      if (!options || typeof options !== "object") {
+        console.log(`❌ PlatformerRoom: Invalid options from ${client.sessionId}`)
+        throw new Error("Invalid authentication options")
+      }
+
+      // Validate required options
+      if (!options.username || typeof options.username !== "string" || options.username.trim() === "") {
+        console.log(`❌ PlatformerRoom: Invalid username from ${client.sessionId}`)
+        throw new Error("Username is required")
+      }
+
+      // Sanitize username
+      options.username = options.username.trim().substring(0, 20)
+
+      // Check room capacity
+      if (this.clients.length >= this.maxClients) {
+        console.log(`❌ PlatformerRoom: Room is full (${this.clients.length}/${this.maxClients})`)
+        throw new Error("Room is full")
+      }
+
+      // Don't allow joining if game has already started
+      if (this.state.gameStarted) {
+        console.log(`❌ PlatformerRoom: Game already started, cannot join`)
+        throw new Error("Game already started")
+      }
+
+      console.log(`✅ PlatformerRoom: Authentication successful for ${client.sessionId} (${options.username})`)
+      return {
+        username: options.username,
+        characterType: options.characterType || "default",
+        authenticated: true,
+        joinTime: Date.now(),
+      }
+    } catch (error) {
+      console.error(`❌ PlatformerRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      throw error
+    }
+  }
+
   onJoin(client: Client, options: any) {
     console.log(`Player ${client.sessionId} joined the platformer room`)
 

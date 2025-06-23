@@ -58,6 +58,50 @@ export class RaceRoom extends Room<RaceState> {
     })
   }
 
+  async onAuth(client: Client, options: any) {
+    console.log(`🔐 RaceRoom: Authentication request from ${client.sessionId}`, options)
+
+    try {
+      // Validate options
+      if (!options || typeof options !== "object") {
+        console.log(`❌ RaceRoom: Invalid options from ${client.sessionId}`)
+        throw new Error("Invalid authentication options")
+      }
+
+      // Validate required options
+      if (!options.username || typeof options.username !== "string" || options.username.trim() === "") {
+        console.log(`❌ RaceRoom: Invalid username from ${client.sessionId}`)
+        throw new Error("Username is required")
+      }
+
+      // Sanitize username
+      options.username = options.username.trim().substring(0, 20)
+
+      // Check room capacity
+      if (this.clients.length >= this.maxClients) {
+        console.log(`❌ RaceRoom: Room is full (${this.clients.length}/${this.maxClients})`)
+        throw new Error("Room is full")
+      }
+
+      // Don't allow joining if race has already started
+      if (this.state.raceStarted) {
+        console.log(`❌ RaceRoom: Race already started, cannot join`)
+        throw new Error("Race already started")
+      }
+
+      console.log(`✅ RaceRoom: Authentication successful for ${client.sessionId} (${options.username})`)
+      return {
+        username: options.username,
+        vehicleType: options.vehicleType || "default",
+        authenticated: true,
+        joinTime: Date.now(),
+      }
+    } catch (error) {
+      console.error(`❌ RaceRoom: Authentication failed for ${client.sessionId}:`, error.message)
+      throw error
+    }
+  }
+
   onJoin(client: Client, options: any) {
     console.log(`Player ${client.sessionId} joined the race room`)
 
