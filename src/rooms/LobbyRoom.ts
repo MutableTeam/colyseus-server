@@ -1,9 +1,15 @@
 import { Room, type Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
 
+interface GameSession {
+  gameType: string
+  players: Set<string>
+  createdAt: number
+}
+
 export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
-  private gameSession: GameSession | null = null
+  private gameSession: GameSession | undefined
 
   onCreate(options: any) {
     console.log("🏠 LobbyRoom created!", options)
@@ -345,7 +351,7 @@ export class LobbyRoom extends Room<LobbyState> {
       })
 
       // Clear the game session
-      this.gameSession = null
+      this.gameSession = undefined
 
       console.log(`✅ Battle room creation initiated for ready players`)
     } catch (error) {
@@ -369,7 +375,11 @@ export class LobbyRoom extends Room<LobbyState> {
   private joinOrCreateGameSession(client: Client, gameType: string) {
     // Create new game session if none exists
     if (!this.gameSession) {
-      this.gameSession = new GameSession(gameType)
+      this.gameSession = {
+        gameType: gameType,
+        players: new Set<string>(),
+        createdAt: Date.now(),
+      }
       console.log(`🎮 Created new game session for ${gameType}`)
     }
 
@@ -400,13 +410,11 @@ export class LobbyRoom extends Room<LobbyState> {
     })
   }
 
-  private removePlayerFromGameSession(playerId: string): void {
-    // Early return if no game session exists
-    if (this.gameSession === null) {
+  private removePlayerFromGameSession(playerId: string) {
+    if (!this.gameSession) {
       return
     }
 
-    // Remove player from session
     this.gameSession.players.delete(playerId)
 
     // Reset player ready state
@@ -415,32 +423,27 @@ export class LobbyRoom extends Room<LobbyState> {
       player.ready = false
     }
 
-    const remainingPlayers = this.gameSession.players.size
-    console.log(`🚪 Player ${playerId} left game session (${remainingPlayers} players remaining)`)
+    console.log(`🚪 Player ${playerId} left game session (${this.gameSession.players.size} players remaining)`)
 
-    // Handle empty session case
-    if (remainingPlayers === 0) {
-      this.gameSession = null
+    // Remove session if empty
+    if (this.gameSession.players.size === 0) {
+      this.gameSession = undefined
       console.log(`🗑️ Game session removed (no players remaining)`)
 
-      // Broadcast session update for empty session
       this.broadcast("game_session_update", {
         gameType: null,
         playerCount: 0,
         players: [],
         timestamp: Date.now(),
       })
-      return
+    } else {
+      this.broadcast("game_session_update", {
+        gameType: this.gameSession.gameType,
+        playerCount: this.gameSession.players.size,
+        players: Array.from(this.gameSession.players),
+        timestamp: Date.now(),
+      })
     }
-
-    // At this point, gameSession is guaranteed to be non-null and have players
-    const session = this.gameSession!
-    this.broadcast("game_session_update", {
-      gameType: session.gameType,
-      playerCount: session.players.size,
-      players: Array.from(session.players),
-      timestamp: Date.now(),
-    })
   }
 
   onLeave(client: Client, consented: boolean) {
@@ -485,17 +488,5 @@ export class LobbyRoom extends Room<LobbyState> {
 
   onError(client: Client, error: any) {
     console.error(`❌ LobbyRoom: Client ${client.sessionId} error:`, error)
-  }
-}
-
-class GameSession {
-  public gameType: string
-  public players: Set<string>
-  public createdAt: number
-
-  constructor(gameType: string) {
-    this.gameType = gameType
-    this.players = new Set()
-    this.createdAt = Date.now()
   }
 }
