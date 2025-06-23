@@ -467,8 +467,9 @@ export class LobbyRoom extends Room<LobbyState> {
   }
 
   private broadcastLobbyStats(readyPlayers?: number) {
-    let calculatedReadyPlayers = readyPlayers
-    if (calculatedReadyPlayers === undefined) {
+    let calculatedReadyPlayers = readyPlayers ?? 0 // Use nullish coalescing to ensure it's never undefined
+
+    if (readyPlayers === undefined) {
       calculatedReadyPlayers = 0
       this.state.players.forEach((player) => {
         if (player.ready) calculatedReadyPlayers++
@@ -477,7 +478,7 @@ export class LobbyRoom extends Room<LobbyState> {
 
     this.broadcast("lobby_stats_update", {
       totalPlayers: this.state.players.size,
-      readyPlayers: calculatedReadyPlayers,
+      readyPlayers: calculatedReadyPlayers, // Now guaranteed to be a number
       gameSessionActive: !!this.gameSession,
       timestamp: Date.now(),
     })
