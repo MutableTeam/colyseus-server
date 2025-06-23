@@ -1,154 +1,301 @@
-import { Server } from "@colyseus/core"
-import { createServer } from "http"
-import { WebSocketTransport } from "@colyseus/ws-transport"
+import config from "@colyseus/tools"
 import { monitor } from "@colyseus/monitor"
-import { playground } from "@colyseus/playground"
-import express from "express"
-import cors from "cors"
-
-// Import custom rooms
+import { WebSocketTransport } from "@colyseus/ws-transport"
+import { matchMaker } from "@colyseus/core"
 import { HubRoom } from "./rooms/HubRoom"
-import { CustomLobbyRoom } from "./rooms/CustomLobbyRoom"
 import { BattleRoom } from "./rooms/BattleRoom"
 import { RaceRoom } from "./rooms/RaceRoom"
 import { PlatformerRoom } from "./rooms/PlatformerRoom"
+import { CustomLobbyRoom } from "./rooms/CustomLobbyRoom"
 
-const port = Number(process.env.PORT || 2567)
-const app = express()
+export default config({
+  initializeTransport: (options) =>
+    new WebSocketTransport({
+      ...options,
+      pingInterval: 5000,
+      pingMaxRetries: 3,
+    }),
 
-// Enable CORS for all routes
-app.use(cors())
-app.use(express.json())
+  initializeGameServer: (gameServer) => {
+    // Register the hub room first - this is the main entry point
+    gameServer.define("hub", HubRoom)
 
-// Create HTTP server
-const server = createServer(app)
+    // Register the custom lobby room for readiness system
+    gameServer.define("lobby", CustomLobbyRoom)
 
-// Create game server with WebSocket transport
-const gameServer = new Server({
-  transport: new WebSocketTransport({
-    server: server,
-    pingInterval: 30000,
-    pingMaxRetries: 3,
-  }),
-  presence: undefined, // Use default local presence for simplicity
+    // Register game-specific rooms with real-time listing enabled
+    gameServer.define("battle", BattleRoom).enableRealtimeListing()
+
+    gameServer.define("race", RaceRoom).enableRealtimeListing()
+
+    gameServer.define("platformer", PlatformerRoom).enableRealtimeListing()
+
+    gameServer.onShutdown(() => {
+      console.log("🛑 Game server shutting down...")
+    })
+
+    console.log("🎮 Game server initialized with room definitions")
+    console.log("🔄 Real-time listing enabled for game rooms")
+    console.log("🏠 Using built-in LobbyRoom for room discovery")
+  },
+
+  initializeExpress: (app) => {
+    // Health check endpoint
+    app.get("/health", (req, res) => {
+      res.json({
+        status: "ok",
+        uptime: process.uptime(),
+        timestamp: Date.now(),
+        hubAvailable: true,
+      })
+    })
+
+    // Get hub room status
+    app.get("/api/hub", async (req, res) => {
+      try {
+        res.json({
+          success: true,
+          hubStatus: "online",
+          message: "Hub room is available",
+          timestamp: Date.now(),
+        })
+      } catch (error: any) {
+        console.error("API: Error getting hub status:", error)
+        res.status(500).json({
+          success: false,
+          error: error.message,
+          hubStatus: "error",
+        })
+      }
+    })
+
+    // Get available rooms using official Colyseus matchMaker API
+    app.get("/api/rooms", async (req, res) => {
+      try {
+        const gameTypeFilter = req.query.gameType as string
+        console.log("🔍 API: Searching for rooms using matchMaker.query()")
+        console.log("🔍 API: Requested game type filter:", gameTypeFilter || "all")
+
+        let rooms: any[] = []
+
+        if (gameTypeFilter) {
+          // Query for specific room type
+          console.log(`🔍 API: Querying for rooms with name: ${gameTypeFilter}`)
+          rooms = await matchMaker.query({ name: gameTypeFilter })
+        } else {
+          // Query for all supported room types
+          const roomTypes = ["hub", "lobby", "battle", "race", "platformer"]
+          const allRoomQueries = roomTypes.map(async (roomType) => {
+            try {
+              const roomsOfType = await matchMaker.query({ name: roomType })
+              return roomsOfType
+            } catch (error) {
+              console.log(`No rooms found for type: ${roomType}`)
+              return []
+            }
+          })
+
+          const roomResults = await Promise.all(allRoomQueries)
+          rooms = roomResults.flat()
+        }
+
+        console.log(`📊 API: matchMaker.query() returned ${rooms.length} rooms`)
+
+        // Transform and filter results
+        const formattedRooms = rooms
+          .filter((room) => {
+            // Only include rooms that are joinable (not locked and not full)
+            const isJoinable = !room.locked && room.clients < room.maxClients
+            console.log(
+              `🔍 API: Room ${room.roomId} (${room.name}) - locked: ${room.locked}, clients: ${room.clients}/${room.maxClients}, joinable: ${isJoinable}`,
+            )
+            return isJoinable
+          })
+          .map((room: any) => ({
+            roomId: room.roomId,
+            name: room.metadata?.name || `${room.name}_${room.roomId.substring(0, 8)}`,
+            type: room.name,
+            clients: room.clients || 0,
+            maxClients: room.maxClients || 50,
+            locked: room.locked || false,
+            private: room.private || false,
+            createdAt: room.createdAt || Date.now(),
+            metadata: room.metadata || {},
+          }))
+
+        console.log(`📊 API: Returning ${formattedRooms.length} joinable rooms`)
+
+        formattedRooms.forEach((room, index) => {
+          console.log(
+            `📋 API Room ${index + 1}: ${room.name} (${room.type}) - ${room.clients}/${room.maxClients} players - ID: ${room.roomId}`,
+          )
+        })
+
+        res.json(formattedRooms)
+      } catch (error: any) {
+        console.error("❌ API: Error in /api/rooms endpoint:", error)
+        res.status(500).json({
+          error: "Failed to get rooms",
+          details: error.message,
+          rooms: [],
+        })
+      }
+    })
+
+    // Debug endpoint using official matchMaker API
+    app.get("/api/debug", async (req, res) => {
+      try {
+        const debug: any = {
+          matchMakerExists: !!matchMaker,
+          timestamp: Date.now(),
+        }
+
+        // Get matchMaker stats
+        try {
+          if (matchMaker.stats) {
+            debug.localStats = {
+              ccu: matchMaker.stats.local.ccu,
+              roomCount: matchMaker.stats.local.roomCount,
+            }
+
+            try {
+              const globalStats = await matchMaker.stats.fetchAll()
+              debug.globalStats = globalStats
+            } catch (globalError: any) {
+              debug.globalStatsError = globalError.message
+            }
+          }
+        } catch (statsError: any) {
+          debug.statsError = statsError.message
+        }
+
+        // Test matchMaker.query for each room type
+        const roomTypes = ["hub", "lobby", "battle", "race", "platformer"]
+        debug.roomQueries = {}
+
+        for (const roomType of roomTypes) {
+          try {
+            const rooms = await matchMaker.query({ name: roomType })
+            debug.roomQueries[roomType] = {
+              count: rooms.length,
+              rooms: rooms.map((r: any) => ({
+                id: r.roomId,
+                name: r.name,
+                clients: r.clients,
+                maxClients: r.maxClients,
+                locked: r.locked,
+              })),
+            }
+          } catch (queryError: any) {
+            debug.roomQueries[roomType] = {
+              error: queryError.message,
+              count: 0,
+              rooms: [],
+            }
+          }
+        }
+
+        res.json(debug)
+      } catch (error: any) {
+        res.status(500).json({
+          error: "Debug failed",
+          details: error.message,
+        })
+      }
+    })
+
+    // Test specific matchMaker methods
+    app.get("/api/matchmaker-test", async (req, res) => {
+      try {
+        const results: any = {
+          timestamp: Date.now(),
+          tests: {},
+        }
+
+        // Test 1: Query all rooms
+        try {
+          const allRooms = await matchMaker.query({})
+          results.tests.queryAll = {
+            success: true,
+            count: allRooms.length,
+            rooms: allRooms.map((r: any) => ({ id: r.roomId, name: r.name, clients: r.clients })),
+          }
+        } catch (error: any) {
+          results.tests.queryAll = { success: false, error: error.message }
+        }
+
+        // Test 2: Query lobby rooms specifically
+        try {
+          const lobbyRooms = await matchMaker.query({ name: "lobby" })
+          results.tests.queryLobby = {
+            success: true,
+            count: lobbyRooms.length,
+            rooms: lobbyRooms.map((r: any) => ({ id: r.roomId, name: r.name, clients: r.clients })),
+          }
+        } catch (error: any) {
+          results.tests.queryLobby = { success: false, error: error.message }
+        }
+
+        // Test 3: Find one available lobby room
+        try {
+          const availableRoom = await matchMaker.findOneRoomAvailable("lobby", {})
+          results.tests.findOneAvailable = {
+            success: true,
+            room: availableRoom
+              ? { id: availableRoom.roomId, name: availableRoom.name, clients: availableRoom.clients }
+              : null,
+          }
+        } catch (error: any) {
+          results.tests.findOneAvailable = { success: false, error: error.message }
+        }
+
+        // Test 4: Get global CCU
+        try {
+          const globalCCU = await matchMaker.stats.getGlobalCCU()
+          results.tests.globalCCU = {
+            success: true,
+            ccu: globalCCU,
+          }
+        } catch (error: any) {
+          results.tests.globalCCU = { success: false, error: error.message }
+        }
+
+        res.json(results)
+      } catch (error: any) {
+        res.status(500).json({
+          error: "MatchMaker test failed",
+          details: error.message,
+        })
+      }
+    })
+
+    // Add Colyseus Monitor
+    app.use("/colyseus", monitor())
+
+    // Add Colyseus Playground only in development
+    if (process.env.NODE_ENV !== "production") {
+      try {
+        const { playground } = require("@colyseus/playground")
+        app.use("/playground", playground())
+      } catch (e) {
+        console.log("Playground not available in this environment")
+      }
+    }
+  },
+
+  beforeListen: () => {
+    console.log("🎮 Colyseus server starting...")
+    console.log("🏠 Hub room will be the main entry point for all players")
+    console.log("🏛️ Using built-in LobbyRoom for automatic room discovery")
+    console.log("📡 API endpoints available:")
+    console.log("   GET /api/hub - Get hub status")
+    console.log("   GET /api/rooms - Get available rooms (using matchMaker.query)")
+    console.log("   GET /api/debug - Debug server state and test matchMaker")
+    console.log("   GET /api/matchmaker-test - Test specific matchMaker methods")
+    console.log("   GET /health - Health check")
+    console.log("📡 Standard Colyseus endpoints:")
+    console.log("   GET /matchmake/hub - Get available hub rooms")
+    console.log("   POST /matchmake/joinOrCreate/hub - Join the main hub")
+    console.log("   POST /matchmake/joinOrCreate/lobby - Join the built-in lobby for room discovery")
+  },
 })
-
-// Register room handlers with detailed logging
-console.log("🔧 Registering room handlers...")
-
-try {
-  // Register Hub Room for player discovery
-  gameServer.define("hub", HubRoom).filterBy(["region"])
-  console.log("✅ Registered HubRoom as 'hub'")
-
-  // Register Custom Lobby Room (renamed to avoid conflict with built-in LobbyRoom)
-  gameServer.define("lobby", CustomLobbyRoom).filterBy(["region"])
-  console.log("✅ Registered CustomLobbyRoom as 'lobby'")
-
-  // Register Battle Room for Three.js multiplayer battles
-  gameServer.define("battle", BattleRoom).filterBy(["gameMode", "mapTheme"])
-  console.log("✅ Registered BattleRoom as 'battle'")
-
-  // Register Race Room
-  gameServer.define("race", RaceRoom).filterBy(["trackType", "difficulty"])
-  console.log("✅ Registered RaceRoom as 'race'")
-
-  // Register Platformer Room
-  gameServer.define("platformer", PlatformerRoom).filterBy(["levelType", "difficulty"])
-  console.log("✅ Registered PlatformerRoom as 'platformer'")
-
-  console.log("🎮 All rooms registered successfully!")
-} catch (error) {
-  console.error("❌ Error registering rooms:", error)
-  process.exit(1)
-}
-
-// API Routes for testing and room discovery
-app.get("/", (req, res) => {
-  res.send(`
-    <h1>🎮 Colyseus Battle Server</h1>
-    <p>Server is running with Three.js battle support!</p>
-    <ul>
-      <li><a href="/api/rooms">Available Rooms</a></li>
-      <li><a href="/api/matchmaker-test">Matchmaker Test</a></li>
-      <li><a href="/colyseus">Monitor</a></li>
-      <li><a href="/playground">Playground</a></li>
-    </ul>
-  `)
-})
-
-// Get available rooms
-app.get("/api/rooms", async (req, res) => {
-  try {
-    const rooms = await gameServer.matchMaker.query({})
-    console.log(`📊 API: Found ${rooms.length} available rooms`)
-
-    const roomsData = rooms.map((room) => ({
-      roomId: room.roomId,
-      name: room.metadata?.name || `${room.name} Room`,
-      type: room.name,
-      clients: room.clients,
-      maxClients: room.maxClients,
-      metadata: room.metadata,
-    }))
-
-    res.json(roomsData)
-  } catch (error) {
-    console.error("❌ API: Error querying rooms:", error)
-    res.status(500).json({ error: "Failed to get rooms" })
-  }
-})
-
-// Matchmaker testing endpoint
-app.get("/api/matchmaker-test", async (req, res) => {
-  const tests = {
-    queryAll: { success: false, count: 0, error: null },
-    queryLobby: { success: false, count: 0, error: null },
-  }
-
-  try {
-    // Test 1: Query all rooms
-    const allRooms = await gameServer.matchMaker.query({})
-    tests.queryAll.success = true
-    tests.queryAll.count = allRooms.length
-    console.log(`🧪 API Test: Found ${allRooms.length} total rooms`)
-  } catch (error) {
-    tests.queryAll.error = error.message
-    console.error("🧪 API Test: Query all rooms failed:", error)
-  }
-
-  try {
-    // Test 2: Query lobby rooms specifically
-    const lobbyRooms = await gameServer.matchMaker.query({ name: "lobby" })
-    tests.queryLobby.success = true
-    tests.queryLobby.count = lobbyRooms.length
-    console.log(`🧪 API Test: Found ${lobbyRooms.length} lobby rooms`)
-  } catch (error) {
-    tests.queryLobby.error = error.message
-    console.error("🧪 API Test: Query lobby rooms failed:", error)
-  }
-
-  res.json({ tests, timestamp: new Date().toISOString() })
-})
-
-// Add Colyseus monitor
-app.use("/colyseus", monitor())
-
-// Add Colyseus playground in development
-if (process.env.NODE_ENV !== "production") {
-  app.use("/playground", playground)
-  console.log("🎮 Playground available at /playground")
-}
-
-// Start the server
-gameServer.listen(port).then(() => {
-  console.log(`🚀 Colyseus Server listening on http://localhost:${port}`)
-  console.log(`📊 Monitor available at http://localhost:${port}/colyseus`)
-  if (process.env.NODE_ENV !== "production") {
-    console.log(`🎮 Playground available at http://localhost:${port}/playground`)
-  }
-  console.log("⚔️ Battle Room with Three.js support ready!")
-  console.log("🏛️ CustomLobbyRoom ready for player matching!")
-})
-
-export default app
