@@ -170,13 +170,14 @@ export class HubRoom extends Room<HubState> {
       }
 
       // Very permissive authentication for hub
-      if (!options.username || typeof options.username !== "string" || options.username.trim() === "") {
+      let username = options.username
+      if (!username || typeof username !== "string" || username.trim() === "") {
         console.log(`⚠️ HubRoom: No valid username provided, using default for ${client.sessionId}`)
-        options.username = `Player_${client.sessionId.substring(0, 6)}`
+        username = `Player_${client.sessionId.substring(0, 6)}`
       }
 
       // Sanitize username
-      options.username = options.username.trim().substring(0, 20)
+      username = username.trim().substring(0, 20)
 
       // Check room capacity AFTER validation
       if (this.clients.length >= this.maxClients) {
@@ -184,9 +185,9 @@ export class HubRoom extends Room<HubState> {
         throw new Error("Hub is full")
       }
 
-      console.log(`✅ HubRoom: Authentication successful for ${client.sessionId} (${options.username})`)
+      console.log(`✅ HubRoom: Authentication successful for ${client.sessionId} (${username})`)
       return {
-        username: options.username,
+        username: username,
         authenticated: true,
         joinTime: Date.now(),
       }
