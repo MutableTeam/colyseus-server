@@ -419,11 +419,12 @@ export class LobbyRoom extends Room<LobbyState> {
       console.log(`🗑️ Game session removed (no players remaining)`)
     }
 
-    // Broadcast session update
+    // Broadcast session update - Fixed null check
+    const gameSession = this.gameSession
     this.broadcast("game_session_update", {
-      gameType: this.gameSession?.gameType || null,
-      playerCount: this.gameSession?.players.size || 0,
-      players: this.gameSession ? Array.from(this.gameSession.players) : [],
+      gameType: gameSession?.gameType || null,
+      playerCount: gameSession?.players.size || 0,
+      players: gameSession ? Array.from(gameSession.players) : [],
       timestamp: Date.now(),
     })
   }
