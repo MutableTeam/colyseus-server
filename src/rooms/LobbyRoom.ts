@@ -1,13 +1,13 @@
 import { Room, type Client, ServerError } from "@colyseus/core" // Add ServerError
 import { LobbyState } from "../schemas/LobbyState"
 
-export class CustomLobbyRoom extends Room<LobbyState> {
+export class LobbyRoom extends Room<LobbyState> {
   maxClients = 50
   private gameSession: any = null
 
   onCreate(options: any) {
-    console.log(`🏛️ CustomLobbyRoom ${this.roomId}: CREATED. Options:`, options)
-    console.log(`🏛️ CustomLobbyRoom ${this.roomId}: Initial maxClients from class: ${this.maxClients}`)
+    console.log(`🏛️ LobbyRoom ${this.roomId}: CREATED. Options:`, options)
+    console.log(`🏛️ LobbyRoom ${this.roomId}: Initial maxClients from class: ${this.maxClients}`)
     try {
       this.setState(new LobbyState())
       // Handle player joining a game
@@ -18,7 +18,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           this.broadcast("available_games", this.state.availableGames)
         } catch (e: any) {
           console.error(
-            `❌ CustomLobbyRoom ${this.roomId}: Error handling join_game for ${client.sessionId}: ${e.message}`,
+            `❌ LobbyRoom ${this.roomId}: Error handling join_game for ${client.sessionId}: ${e.message}`,
             e.stack,
           )
         }
@@ -40,7 +40,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           })
         } catch (e: any) {
           console.error(
-            `❌ CustomLobbyRoom ${this.roomId}: Error handling create_game for ${client.sessionId}: ${e.message}`,
+            `❌ LobbyRoom ${this.roomId}: Error handling create_game for ${client.sessionId}: ${e.message}`,
             e.stack,
           )
         }
@@ -57,7 +57,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           })
         } catch (e: any) {
           console.error(
-            `❌ CustomLobbyRoom ${this.roomId}: Error handling leave_game for ${client.sessionId}: ${e.message}`,
+            `❌ LobbyRoom ${this.roomId}: Error handling leave_game for ${client.sessionId}: ${e.message}`,
             e.stack,
           )
         }
@@ -83,7 +83,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           console.log(`📤 Sent ${activeLobbies.length} active lobbies to player ${client.sessionId}`)
         } catch (e: any) {
           console.error(
-            `❌ CustomLobbyRoom ${this.roomId}: Error handling get_active_lobbies for ${client.sessionId}: ${e.message}`,
+            `❌ LobbyRoom ${this.roomId}: Error handling get_active_lobbies for ${client.sessionId}: ${e.message}`,
             e.stack,
           )
         }
@@ -130,7 +130,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           this.joinOrCreateGameSession(client, gameType)
         } catch (e: any) {
           console.error(
-            `❌ CustomLobbyRoom ${this.roomId}: Error handling select_game_type for ${client.sessionId}: ${e.message}`,
+            `❌ LobbyRoom ${this.roomId}: Error handling select_game_type for ${client.sessionId}: ${e.message}`,
             e.stack,
           )
         }
@@ -142,7 +142,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           this.removePlayerFromGameSession(client.sessionId)
         } catch (e: any) {
           console.error(
-            `❌ CustomLobbyRoom ${this.roomId}: Error handling leave_game_session for ${client.sessionId}: ${e.message}`,
+            `❌ LobbyRoom ${this.roomId}: Error handling leave_game_session for ${client.sessionId}: ${e.message}`,
             e.stack,
           )
         }
@@ -175,7 +175,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           this.broadcastLobbyStats()
         } catch (e: any) {
           console.error(
-            `❌ CustomLobbyRoom ${this.roomId}: Error handling test_message for ${client.sessionId}: ${e.message}`,
+            `❌ LobbyRoom ${this.roomId}: Error handling test_message for ${client.sessionId}: ${e.message}`,
             e.stack,
           )
         }
@@ -187,7 +187,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           client.send("pong", { timestamp: Date.now() })
         } catch (e: any) {
           console.error(
-            `❌ CustomLobbyRoom ${this.roomId}: Error handling ping for ${client.sessionId}: ${e.message}`,
+            `❌ LobbyRoom ${this.roomId}: Error handling ping for ${client.sessionId}: ${e.message}`,
             e.stack,
           )
         }
@@ -209,23 +209,23 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
       console.log(`🏛️ LobbyRoom ${this.roomId} is now discoverable with readiness system active`)
     } catch (e: any) {
-      console.error(`❌ CustomLobbyRoom ${this.roomId}: CRITICAL ERROR during setState: ${e.message}`, e.stack)
-      throw new ServerError(500, `CustomLobbyRoom state initialization failed: ${e.message}`)
+      console.error(`❌ LobbyRoom ${this.roomId}: CRITICAL ERROR during setState: ${e.message}`, e.stack)
+      throw new ServerError(500, `LobbyRoom state initialization failed: ${e.message}`)
     }
     console.log(
-      `🌟 CustomLobbyRoom ${this.roomId}: Fully initialized. Current clients: ${this.clients.length}. Effective maxClients: ${this.maxClients}`,
+      `🌟 LobbyRoom ${this.roomId}: Fully initialized. Current clients: ${this.clients.length}. Effective maxClients: ${this.maxClients}`,
     )
   }
 
   async onAuth(client: Client, options: any) {
     console.log(
-      `🔐 CustomLobbyRoom ${this.roomId}: AUTH request from ${client.sessionId}. Current clients: ${this.clients.length}. Effective maxClients: ${this.maxClients}. Options:`,
+      `🔐 LobbyRoom ${this.roomId}: AUTH request from ${client.sessionId}. Current clients: ${this.clients.length}. Effective maxClients: ${this.maxClients}. Options:`,
       options,
     )
 
     if (this.clients.length >= this.maxClients) {
       console.warn(
-        `⚠️ CustomLobbyRoom ${this.roomId}: AUTH REJECTED for ${client.sessionId} - Room is actually full based on current client count (${this.clients.length}/${this.maxClients}).`,
+        `⚠️ LobbyRoom ${this.roomId}: AUTH REJECTED for ${client.sessionId} - Room is actually full based on current client count (${this.clients.length}/${this.maxClients}).`,
       )
       throw new ServerError(4002, "Lobby room is full (checked in onAuth).")
     }
@@ -234,26 +234,26 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     if (!username || typeof username !== "string" || username.trim() === "") {
       username = `Player_${client.sessionId.substring(0, 6)}`
       console.log(
-        `⚠️ CustomLobbyRoom ${this.roomId}: No valid username for ${client.sessionId}, using default: ${username}`,
+        `⚠️ LobbyRoom ${this.roomId}: No valid username for ${client.sessionId}, using default: ${username}`,
       )
     }
     username = username.trim().substring(0, 20)
 
     console.log(
-      `✅ CustomLobbyRoom ${this.roomId}: AUTH successful for ${client.sessionId} (${username}). Clients before join: ${this.clients.length}.`,
+      `✅ LobbyRoom ${this.roomId}: AUTH successful for ${client.sessionId} (${username}). Clients before join: ${this.clients.length}.`,
     )
     return { username, authenticated: true, joinTime: Date.now() }
   }
 
   onJoin(client: Client, options: any) {
     console.log(
-      `🚪 CustomLobbyRoom ${this.roomId}: JOIN ${client.sessionId} (${options.username}). Clients before adding to state: ${this.clients.length}. Effective maxClients: ${this.maxClients}`,
+      `🚪 LobbyRoom ${this.roomId}: JOIN ${client.sessionId} (${options.username}). Clients before adding to state: ${this.clients.length}. Effective maxClients: ${this.maxClients}`,
     )
     try {
       const username = options.username // Already validated in onAuth
       this.state.addPlayer(client.sessionId, username)
       console.log(
-        `🏛️ CustomLobbyRoom ${this.roomId}: Player ${username} (${client.sessionId}) added to state. Total players in state: ${this.state.players.size}. Current clients: ${this.clients.length}`,
+        `🏛️ LobbyRoom ${this.roomId}: Player ${username} (${client.sessionId}) added to state. Total players in state: ${this.state.players.size}. Current clients: ${this.clients.length}`,
       )
 
       const playersArray: Array<{ id: string; name: string; ready: boolean }> = []
@@ -291,11 +291,11 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       this.broadcastLobbyStats()
 
       console.log(
-        `✅ CustomLobbyRoom ${this.roomId}: JOIN complete for ${client.sessionId}. Total players in state: ${this.state.players.size}. Current clients: ${this.clients.length}`,
+        `✅ LobbyRoom ${this.roomId}: JOIN complete for ${client.sessionId}. Total players in state: ${this.state.players.size}. Current clients: ${this.clients.length}`,
       )
     } catch (e: any) {
       console.error(
-        `❌ CustomLobbyRoom ${this.roomId}: CRITICAL ERROR during onJoin for ${client.sessionId}: ${e.message}`,
+        `❌ LobbyRoom ${this.roomId}: CRITICAL ERROR during onJoin for ${client.sessionId}: ${e.message}`,
         e.stack,
       )
       client.leave(1011, `Server error during join: ${e.message}`)
@@ -304,7 +304,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
   onLeave(client: Client, consented: boolean) {
     console.log(
-      `👋 CustomLobbyRoom ${this.roomId}: LEAVE ${client.sessionId} (consented: ${consented}). Clients before removal: ${this.clients.length}`,
+      `👋 LobbyRoom ${this.roomId}: LEAVE ${client.sessionId} (consented: ${consented}). Clients before removal: ${this.clients.length}`,
     )
     try {
       this.removePlayerFromGameSession(client.sessionId)
@@ -313,21 +313,21 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
       if (removed) {
         console.log(
-          `🏛️ CustomLobbyRoom ${this.roomId}: Player ${client.sessionId} removed from state. Total players in state: ${this.state.players.size}. Current clients: ${this.clients.length - 1}`,
+          `🏛️ LobbyRoom ${this.roomId}: Player ${client.sessionId} removed from state. Total players in state: ${this.state.players.size}. Current clients: ${this.clients.length - 1}`,
         )
         this.broadcast("player_left", { playerId: client.sessionId, timestamp: Date.now() })
       } else {
-        console.warn(`⚠️ CustomLobbyRoom ${this.roomId}: Player ${client.sessionId} not found in state during onLeave.`)
+        console.warn(`⚠️ LobbyRoom ${this.roomId}: Player ${client.sessionId} not found in state during onLeave.`)
       }
       this.broadcastLobbyStats()
     } catch (e: any) {
       console.error(
-        `❌ CustomLobbyRoom ${this.roomId}: Error during onLeave for ${client.sessionId}: ${e.message}`,
+        `❌ LobbyRoom ${this.roomId}: Error during onLeave for ${client.sessionId}: ${e.message}`,
         e.stack,
       )
     }
     console.log(
-      `👋 CustomLobbyRoom ${this.roomId}: LEAVE complete for ${client.sessionId}. Current clients: ${this.clients.length}. Total players in state: ${this.state.players.size}`,
+      `👋 LobbyRoom ${this.roomId}: LEAVE complete for ${client.sessionId}. Current clients: ${this.clients.length}. Total players in state: ${this.state.players.size}`,
     )
   }
 
