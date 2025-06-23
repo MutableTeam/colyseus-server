@@ -8,7 +8,7 @@ import { RaceRoom } from "./rooms/RaceRoom"
 import { PlatformerRoom } from "./rooms/PlatformerRoom"
 import { CustomLobbyRoom } from "./rooms/CustomLobbyRoom"
 
-export default config({
+const app = config({
   initializeTransport: (options) =>
     new WebSocketTransport({
       ...options,
@@ -332,3 +332,5 @@ export default config({
     console.log("   POST /matchmake/joinOrCreate/lobby - Join the built-in lobby for room discovery")
   },
 })
+
+export default app
