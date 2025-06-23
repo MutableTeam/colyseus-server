@@ -144,12 +144,32 @@ export class LobbyRoom extends Room<LobbyState> {
     // Add test message handler for debugging
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`🧪 LobbyRoom: Test message received from ${client.sessionId}:`, message)
+
+      const player = this.state.players.get(client.sessionId)
+      const playerCount = this.state.players.size
+      let readyCount = 0
+
+      this.state.players.forEach((p) => {
+        if (p.ready) readyCount++
+      })
+
       client.send("test_response", {
         message: "Test message received successfully",
         timestamp: Date.now(),
         clientId: client.sessionId,
         roomId: this.roomId,
+        playerFound: !!player,
+        playerName: player?.name || "Unknown",
+        playerReady: player?.ready || false,
+        totalPlayers: playerCount,
+        readyPlayers: readyCount,
+        gameSessionActive: !!this.gameSession,
+        gameSessionType: this.gameSession?.gameType || null,
+        gameSessionPlayers: this.gameSession?.players.size || 0,
       })
+
+      // Also send current lobby stats
+      this.broadcastLobbyStats()
     })
 
     // Handle ping/heartbeat messages
@@ -205,6 +225,10 @@ export class LobbyRoom extends Room<LobbyState> {
         })
       })
 
+      console.log(
+        `📊 LobbyRoom: Sending state to ${client.sessionId} - ${playersArray.length} players, ${gamesArray.length} games`,
+      )
+
       // Send comprehensive lobby state
       client.send("lobby_state", {
         players: playersArray,
@@ -232,10 +256,15 @@ export class LobbyRoom extends Room<LobbyState> {
         timestamp: Date.now(),
       })
 
-      // Broadcast lobby stats update
+      // Broadcast lobby stats update immediately after join
       this.broadcastLobbyStats()
 
       console.log(`📊 LobbyRoom: Now has ${this.clients.length} clients, ${playersArray.length} players`)
+
+      // Send immediate stats update to the new player
+      setTimeout(() => {
+        this.broadcastLobbyStats()
+      }, 500)
     } catch (error) {
       console.error(`❌ LobbyRoom: Error in onJoin for ${client.sessionId}:`, error)
       client.send("error", { message: "Failed to join lobby" })
