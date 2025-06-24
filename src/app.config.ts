@@ -1,9 +1,9 @@
 import { monitor } from "@colyseus/monitor"
 import { playground } from "@colyseus/playground"
-import type { Server as GameServer, RoomListing } from "@colyseus/core" // Changed RoomAvailable to RoomListing
+// Corrected import: Use 'Room' for server-side room listings and 'MatchMaker' for matchMaker property
+import type { Server as GameServer, Room, MatchMaker } from "@colyseus/core"
 import { LobbyRoom } from "@colyseus/core"
-import type * as Express from "express"
-import type { AppConfig } from "@colyseus/tools" // Re-add AppConfig import
+import type * as Express from "express" // Import Express types
 
 /**
  * Import your Room files
@@ -39,8 +39,8 @@ export default {
 
   initializeExpress: (app: Express.Application) => {
     // Colyseus adds the gameServer instance to the Express app object.
-    // We assert its type here for TypeScript to recognize it.
-    const colyseusGameServer = (app as any).gameServer as GameServer
+    // We assert its type here to include the 'matchMaker' property.
+    const colyseusGameServer: GameServer & { matchMaker: MatchMaker } = (app as any).gameServer
 
     /**
      * Bind your custom express routes here:
@@ -48,6 +48,7 @@ export default {
      */
     app.get("/api/matchmaker-test", async (req: Express.Request, res: Express.Response) => {
       try {
+        // Use colyseusGameServer with matchMaker
         const allRooms = await colyseusGameServer.matchMaker.query({})
         const battleRooms = await colyseusGameServer.matchMaker.query({ name: "battle" })
 
@@ -57,12 +58,12 @@ export default {
             queryAll: {
               success: true,
               count: allRooms.length,
-              rooms: allRooms.map((r: RoomListing) => ({ roomId: r.roomId, name: r.name, clients: r.clients })),
+              rooms: allRooms.map((r: Room) => ({ roomId: r.roomId, name: r.name, clients: r.clients })), // Use Room type
             },
             queryLobby: {
               success: true,
               count: battleRooms.length,
-              rooms: battleRooms.map((r: RoomListing) => ({ roomId: r.roomId, name: r.name, clients: r.clients })),
+              rooms: battleRooms.map((r: Room) => ({ roomId: r.roomId, name: r.name, clients: r.clients })), // Use Room type
             },
           },
         })
@@ -74,9 +75,11 @@ export default {
 
     app.get("/api/rooms", async (req: Express.Request, res: Express.Response) => {
       try {
+        // Use colyseusGameServer with matchMaker
         const rooms = await colyseusGameServer.matchMaker.query({})
         res.json(
-          rooms.map((room: RoomListing) => ({
+          rooms.map((room: Room) => ({
+            // Use Room type
             roomId: room.roomId,
             name: room.metadata?.name || room.name,
             type: room.name,
@@ -112,4 +115,6 @@ export default {
      * Before before gameServer.listen() is called.
      */
   },
-} as AppConfig
+}
+// Removed 'as AppConfig' here, as the type is usually inferred or globally available
+// and the explicit import was causing the TS2614 error.
