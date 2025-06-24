@@ -1,8 +1,9 @@
 import { monitor } from "@colyseus/monitor"
 import { playground } from "@colyseus/playground"
-import type { Server as GameServer, RoomAvailable } from "@colyseus/core" // Correctly import Server and alias as GameServer, and import RoomAvailable
-import { LobbyRoom } from "@colyseus/core" // Import built-in LobbyRoom
-import type * as Express from "express" // Import Express types
+import type { Server as GameServer, RoomListing } from "@colyseus/core" // Changed RoomAvailable to RoomListing
+import { LobbyRoom } from "@colyseus/core"
+import type * as Express from "express"
+import type { AppConfig } from "@colyseus/tools" // Re-add AppConfig import
 
 /**
  * Import your Room files
@@ -11,10 +12,6 @@ import { HubRoom } from "./rooms/HubRoom"
 import { BattleRoom } from "./rooms/BattleRoom"
 import { RaceRoom } from "./rooms/RaceRoom"
 import { PlatformerRoom } from "./rooms/PlatformerRoom"
-
-// Define the AppConfig type directly if not imported, or ensure it's globally available
-// For Colyseus Cloud, the `AppConfig` type is usually inferred or provided by the environment.
-// We remove the explicit import that was causing issues.
 
 export default {
   options: {
@@ -40,15 +37,19 @@ export default {
     gameServer.define("platformer", PlatformerRoom).enableRealtimeListing()
   },
 
-  initializeExpress: (app: Express.Application & { gameServer: GameServer }) => {
+  initializeExpress: (app: Express.Application) => {
+    // Colyseus adds the gameServer instance to the Express app object.
+    // We assert its type here for TypeScript to recognize it.
+    const colyseusGameServer = (app as any).gameServer as GameServer
+
     /**
      * Bind your custom express routes here:
      * Read more: https://expressjs.com/en/starter/basic-routing.html
      */
     app.get("/api/matchmaker-test", async (req: Express.Request, res: Express.Response) => {
       try {
-        const allRooms = await app.gameServer.matchMaker.query({})
-        const battleRooms = await app.gameServer.matchMaker.query({ name: "battle" })
+        const allRooms = await colyseusGameServer.matchMaker.query({})
+        const battleRooms = await colyseusGameServer.matchMaker.query({ name: "battle" })
 
         res.json({
           message: "Matchmaker API test successful!",
@@ -56,28 +57,26 @@ export default {
             queryAll: {
               success: true,
               count: allRooms.length,
-              rooms: allRooms.map((r: RoomAvailable) => ({ roomId: r.roomId, name: r.name, clients: r.clients })),
+              rooms: allRooms.map((r: RoomListing) => ({ roomId: r.roomId, name: r.name, clients: r.clients })),
             },
             queryLobby: {
               success: true,
               count: battleRooms.length,
-              rooms: battleRooms.map((r: RoomAvailable) => ({ roomId: r.roomId, name: r.name, clients: r.clients })),
+              rooms: battleRooms.map((r: RoomListing) => ({ roomId: r.roomId, name: r.name, clients: r.clients })),
             },
           },
         })
       } catch (error: unknown) {
-        // Explicitly type error as unknown
         console.error("API Test Error:", error)
-        res.status(500).json({ message: "API Test Failed", error: (error as Error).message }) // Cast error to Error
+        res.status(500).json({ message: "API Test Failed", error: (error as Error).message })
       }
     })
 
     app.get("/api/rooms", async (req: Express.Request, res: Express.Response) => {
       try {
-        const rooms = await app.gameServer.matchMaker.query({})
+        const rooms = await colyseusGameServer.matchMaker.query({})
         res.json(
-          rooms.map((room: RoomAvailable) => ({
-            // Explicitly type room
+          rooms.map((room: RoomListing) => ({
             roomId: room.roomId,
             name: room.metadata?.name || room.name,
             type: room.name,
@@ -87,9 +86,8 @@ export default {
           })),
         )
       } catch (error: unknown) {
-        // Explicitly type error as unknown
         console.error("Error fetching rooms:", error)
-        res.status(500).json({ message: "Failed to fetch rooms", error: (error as Error).message }) // Cast error to Error
+        res.status(500).json({ message: "Failed to fetch rooms", error: (error as Error).message })
       }
     })
 
@@ -114,6 +112,4 @@ export default {
      * Before before gameServer.listen() is called.
      */
   },
-}
-// No 'as AppConfig' here, as the type is usually inferred or globally available
-// and the explicit import was causing the TS2614 error.
+} as AppConfig
