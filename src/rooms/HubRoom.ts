@@ -181,9 +181,6 @@ export class HubRoom extends Room<HubState> {
       // Sanitize username
       username = username.trim().substring(0, 20)
 
-      // REMOVED: Manual capacity check - let Colyseus handle this at framework level
-      // The 4002 error suggests Colyseus thinks the room is full when it shouldn't be
-
       console.log(`✅ HubRoom: Authentication successful for ${client.sessionId} (${username})`)
       console.log(`📊 HubRoom: Will have ${this.clients.length + 1} clients after join`)
 
@@ -213,6 +210,9 @@ export class HubRoom extends Room<HubState> {
 
       console.log(`📊 HubRoom: Player count after join: ${totalPlayers}`)
       console.log(`📊 HubRoom: WebSocket clients: ${this.clients.length}`)
+
+      // CRITICAL: Force state change notification
+      this.state.lastUpdate = Date.now()
 
       // Send welcome message with hub status
       client.send("hub_welcome", {
@@ -253,6 +253,9 @@ export class HubRoom extends Room<HubState> {
       const result = this.state.removePlayer(client.sessionId)
 
       console.log(`📊 HubRoom: Player count after leave: ${result.totalPlayers}`)
+
+      // CRITICAL: Force state change notification
+      this.state.lastUpdate = Date.now()
 
       // Broadcast player count update to remaining clients
       this.broadcast("player_count_update", {

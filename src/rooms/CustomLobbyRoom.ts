@@ -545,12 +545,17 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       })
     }
 
+    // CRITICAL: Broadcast with current player count
+    const currentPlayerCount = this.state.players.size
+
     this.broadcast("lobby_stats_update", {
-      totalPlayers: this.state.players.size,
-      readyPlayers: calculatedReadyPlayers, // Now guaranteed to be a number
+      totalPlayers: currentPlayerCount,
+      readyPlayers: calculatedReadyPlayers,
       gameSessionActive: !!this.gameSession,
       timestamp: Date.now(),
     })
+
+    console.log(`📊 LobbyRoom: Broadcasting stats - ${currentPlayerCount} total, ${calculatedReadyPlayers} ready`)
   }
 
   onLeave(client: Client, consented: boolean) {
