@@ -141,7 +141,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       this.removePlayerFromGameSession(client.sessionId)
     })
 
-    // Add test message handler for debugging
+    // Add test message handler for debugging with enhanced response
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`🧪 LobbyRoom: Test message received from ${client.sessionId}:`, message)
 
@@ -170,6 +170,8 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
       // Also send current lobby stats
       this.broadcastLobbyStats()
+
+      console.log(`📊 Lobby: Sent test response with ${playerCount} total, ${readyCount} ready players`)
     })
 
     // Handle ping/heartbeat messages

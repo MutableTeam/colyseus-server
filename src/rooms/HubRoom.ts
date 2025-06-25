@@ -88,15 +88,36 @@ export class HubRoom extends Room<HubState> {
       })
     })
 
-    // Handle test message
+    // Handle test message with enhanced response
     this.onMessage("test_message", (client: Client, message: any) => {
-      console.log(`🧪 Test message from ${client.sessionId}:`, message)
+      console.log(`🧪 Hub: Test message from ${client.sessionId}:`, message)
+
+      const player = this.state.players.get(client.sessionId)
+      const totalPlayers = this.state.totalPlayers
+
       client.send("test_response", {
         message: "Hub received your message!",
         timestamp: Date.now(),
         clientId: client.sessionId,
         hubStatus: this.state.serverStatus,
+        totalPlayers: totalPlayers,
+        playerFound: !!player,
+        playerName: player?.username || "Unknown",
       })
+
+      // Also send current hub state
+      client.send("hub_state_update", {
+        totalPlayers: totalPlayers,
+        serverStatus: this.state.serverStatus,
+        timestamp: Date.now(),
+      })
+
+      console.log(`📊 Hub: Sent test response with ${totalPlayers} total players`)
+    })
+
+    // Handle ping/heartbeat messages
+    this.onMessage("ping", (client: Client, message: any) => {
+      client.send("pong", { timestamp: Date.now() })
     })
 
     // Set up periodic lobby discovery
