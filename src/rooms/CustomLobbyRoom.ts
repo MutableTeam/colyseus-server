@@ -605,6 +605,6 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     console.error(`❌ LobbyRoom: Client ${client.sessionId} error:`, error)
   }
 
-  // Disable auto-dispose to keep lobby persistent
-  autoDispose = false
+  // REMOVED: Disable auto-dispose to keep lobby persistent
+  // autoDispose = false;
 }
