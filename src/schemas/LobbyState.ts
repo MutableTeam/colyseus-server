@@ -1,9 +1,9 @@
 import { Schema, MapSchema, type } from "@colyseus/schema"
-import { Player } from "./Player" // Changed import from LobbyPlayer to Player
+import { Player } from "./Player"
 import { GameListing } from "./GameListing"
 
 export class LobbyState extends Schema {
-  @type({ map: Player }) players = new MapSchema<Player>() // Changed type to Player
+  @type({ map: Player }) players = new MapSchema<Player>()
   @type({ map: GameListing }) availableGames = new MapSchema<GameListing>()
   @type("number") totalPlayers = 0
   @type("number") readyPlayers = 0
@@ -76,10 +76,10 @@ export class LobbyState extends Schema {
 
   // Updated addPlayer to accept sessionId as optional third argument
   addPlayer(id: string, name: string, sessionId?: string) {
-    const player = new Player() // Use Player schema
+    const player = new Player()
     player.id = id
     player.name = name
-    player.sessionId = sessionId || id // Assign sessionId
+    player.sessionId = sessionId || id
     player.ready = false
     this.players.set(id, player)
     this.updateStats()
@@ -146,7 +146,6 @@ export class LobbyState extends Schema {
   }
 
   getReadyPlayers(): Player[] {
-    // Changed return type to Player[]
     const readyPlayers: Player[] = []
     this.players.forEach((player) => {
       if (player.ready) {
@@ -157,7 +156,6 @@ export class LobbyState extends Schema {
   }
 
   getPlayersByGameType(gameType: string): Player[] {
-    // Changed return type to Player[]
     const players: Player[] = []
     this.players.forEach((player) => {
       if (player.selectedGameType === gameType) {

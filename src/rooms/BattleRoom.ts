@@ -39,9 +39,11 @@ export class BattleRoom extends Room<BattleState> {
     this.onMessage("player_move", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId) as BattlePlayer
       if (player && message.position) {
-        player.x = message.position.x || player.x
-        player.y = message.position.y || player.y
-        player.z = message.position.z || player.z // Include z for consistency
+        player.setPosition(
+          message.position.x || player.x,
+          message.position.y || player.y,
+          message.position.z || player.z,
+        )
       }
     })
 
@@ -58,18 +60,17 @@ export class BattleRoom extends Room<BattleState> {
             this.handlePlayerAttack(client, message)
             break
           case "ability":
-            // FIX: Call usePlayerAbility with 2 arguments as defined in BattleState
             success = this.state.usePlayerAbility(player.sessionId, abilityType)
             break
         }
       }
 
+      // Broadcast ability use to all players
       if (success) {
-        // Broadcast ability use to all players
         this.broadcast("player_used_ability", {
           playerId: client.sessionId,
           abilityType: abilityType,
-          position: { x: player?.x, y: player?.y, z: player?.z }, // Include z
+          position: { x: player?.x, y: player?.y, z: player?.z },
           timestamp: Date.now(),
         })
       } else if (message.type === "ability") {
@@ -119,9 +120,7 @@ export class BattleRoom extends Room<BattleState> {
         const { position, animationState } = message
 
         if (position) {
-          player.x = position.x
-          player.y = position.y
-          player.z = position.z // Include z
+          player.setPosition(position.x, position.y, position.z)
         }
 
         if (animationState) {
@@ -326,7 +325,7 @@ export class BattleRoom extends Room<BattleState> {
     this.broadcast("player_attacked", {
       playerId: client.sessionId,
       attackType: message.attackType || "basic",
-      position: { x: player.x, y: player.y, z: player.z }, // Include z
+      position: { x: player.x, y: player.y, z: player.z },
       timestamp: Date.now(),
     })
   }
@@ -345,7 +344,7 @@ export class BattleRoom extends Room<BattleState> {
         deaths: player.deaths,
         x: player.x,
         y: player.y,
-        z: player.z, // Include z
+        z: player.z,
       })
     })
     return players

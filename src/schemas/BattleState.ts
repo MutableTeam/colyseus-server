@@ -71,19 +71,19 @@ export class BattleState extends Schema {
     player.isAlive = true
     player.health = player.maxHealth
 
-    // Set spawn position using x, y from SpawnPoint
+    // Set spawn position
     const spawnPoint = this.getRandomSpawnPoint()
-    player.x = spawnPoint.x
-    player.y = spawnPoint.y
-    player.z = spawnPoint.z // Also set z for consistency, even if not actively used for movement
+    player.setPosition(spawnPoint.x, spawnPoint.y, spawnPoint.z)
 
     this.players.set(sessionId, player)
+    this.lastUpdate = Date.now()
     return player
   }
 
   removePlayer(sessionId: string): boolean {
     if (this.players.has(sessionId)) {
       this.players.delete(sessionId)
+      this.lastUpdate = Date.now()
       return true
     }
     return false
@@ -130,6 +130,9 @@ export class BattleState extends Schema {
 
   endGame() {
     this.gameActive = false
+    this.gameEnded = true
+    this.lastUpdate = Date.now()
+
     if (!this.winner) {
       // Find player with most kills
       let topPlayer: BattlePlayer | null = null
@@ -182,10 +185,9 @@ export class BattleState extends Schema {
     const player = this.players.get(sessionId)
     if (player && !player.isAlive) {
       const spawnPoint = this.getRandomSpawnPoint()
-      player.x = spawnPoint.x
-      player.y = spawnPoint.y
-      player.z = spawnPoint.z
+      player.setPosition(spawnPoint.x, spawnPoint.y, spawnPoint.z)
       player.respawn()
+      this.lastUpdate = Date.now()
       return true
     }
     return false
@@ -194,9 +196,10 @@ export class BattleState extends Schema {
   // Simple ability usage without complex logic
   usePlayerAbility(sessionId: string, abilityType: string): boolean {
     const player = this.players.get(sessionId)
-    if (player && player.isAlive) {
-      // Implement basic ability logic here
+    if (player && player.isAlive && player.canUseAbility(abilityType)) {
+      player.setAbilityCooldown(abilityType)
       console.log(`Player ${player.name} used ability: ${abilityType}`)
+      this.lastUpdate = Date.now()
       return true
     }
     return false

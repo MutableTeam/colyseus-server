@@ -1,6 +1,6 @@
 import { Room, type Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
-import type { Player } from "../schemas/Player" // Ensure Player is imported
+import type { Player } from "../schemas/Player"
 
 export class CustomLobbyRoom extends Room<LobbyState> {
   maxClients = 50
@@ -90,7 +90,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       try {
         console.log(`🎯 LobbyRoom: Player ${client.sessionId} ready state message:`, message)
 
-        const player = this.state.players.get(client.sessionId) as Player // Cast to Player
+        const player = this.state.players.get(client.sessionId) as Player
         if (!player) {
           console.log(`❌ LobbyRoom: Player ${client.sessionId} not found in state`)
           client.send("error", { message: "Player not found in lobby" })
@@ -106,7 +106,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
         // Update player ready state
         const oldReadyState = player.ready
-        player.setReady(message.ready) // Use the setReady method
+        player.setReady(message.ready)
 
         console.log(
           `✅ LobbyRoom: Player ${client.sessionId} (${player.name}) ready state changed from ${oldReadyState} to ${player.ready}`,
@@ -133,9 +133,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       const { gameType } = message
       console.log(`🎮 Player ${client.sessionId} selected game type: ${gameType}`)
 
-      const player = this.state.players.get(client.sessionId) as Player // Cast to Player
+      const player = this.state.players.get(client.sessionId) as Player
       if (player) {
-        player.selectGameType(gameType) // Use the selectGameType method
+        player.selectGameType(gameType)
       }
 
       // Start or join a game session for this game type
@@ -151,7 +151,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`🧪 LobbyRoom: Test message received from ${client.sessionId}:`, message)
 
-      const player = this.state.players.get(client.sessionId) as Player // Cast to Player
+      const player = this.state.players.get(client.sessionId) as Player
       const playerCount = this.state.players.size
       let readyCount = 0
 
@@ -211,7 +211,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
     // Add player to state
     const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
-    this.state.addPlayer(client.sessionId, username, client.sessionId) // Pass sessionId as third argument
+    this.state.addPlayer(client.sessionId, username, client.sessionId)
 
     // Welcome the new player
     client.send("lobby_welcome", {
@@ -286,7 +286,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     })
 
     // Update player's selected game type in lobby state
-    const player = this.state.players.get(client.sessionId) as Player // Cast to Player
+    const player = this.state.players.get(client.sessionId) as Player
     if (player) {
       player.selectGameType(gameType)
     }

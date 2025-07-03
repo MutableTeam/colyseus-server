@@ -1,67 +1,124 @@
 import { type, MapSchema } from "@colyseus/schema"
-import { Player } from "./Player" // Import the base Player schema
+import { Player } from "./Player"
 
 export class BattlePlayer extends Player {
+  // Battle-specific properties
   @type("number") health = 100
   @type("number") maxHealth = 100
-  @type("boolean") isAlive = true
   @type("number") kills = 0
   @type("number") deaths = 0
   @type("number") score = 0
-  @type("number") lastShotTime = 0 // For simple cooldowns
-  @type("number") respawnTime = 5 // seconds
-  @type("boolean") isRespawning = false
-  @type({ map: "number" }) abilityCooldowns = new MapSchema<number>() // Map of abilityId to cooldown end time
 
-  constructor(id?: string, sessionId?: string, name?: string) {
-    super(id, sessionId, name)
+  // Status
+  @type("boolean") isAlive = true
+  @type("boolean") isRespawning = false
+  @type("number") respawnTime = 5 // seconds
+  @type("number") deathTime = 0
+
+  // Combat timing
+  @type("number") lastShotTime = 0
+  @type("number") shotCooldown = 250 // milliseconds
+
+  // Abilities
+  @type({ map: "number" }) abilityCooldowns = new MapSchema<number>()
+
+  constructor() {
+    super()
     this.health = this.maxHealth
     this.isAlive = true
-    this.kills = 0
-    this.deaths = 0
-    this.score = 0
   }
 
-  takeDamage(amount: number) {
+  // Basic combat methods
+  takeDamage(amount: number): boolean {
+    if (!this.isAlive) return false
+
     this.health -= amount
+
     if (this.health <= 0) {
-      this.health = 0
-      this.isAlive = false
-      this.deaths++
-      this.isRespawning = true
+      this.die()
+      return true
     }
+
+    this.update()
+    return false
   }
 
   heal(amount: number) {
-    this.health += amount
-    if (this.health > this.maxHealth) {
-      this.health = this.maxHealth
-    }
+    if (!this.isAlive) return
+    this.health = Math.min(this.maxHealth, this.health + amount)
+    this.update()
+  }
+
+  die() {
+    this.isAlive = false
+    this.health = 0
+    this.deaths++
+    this.deathTime = Date.now()
+    this.isRespawning = true
+    this.animationState = "dead"
+    this.update()
   }
 
   respawn() {
-    this.health = this.maxHealth
     this.isAlive = true
+    this.health = this.maxHealth
     this.isRespawning = false
-    // Position will be set by BattleState's respawnPlayer
+    this.animationState = "idle"
+    this.update()
   }
 
   addKill() {
     this.kills++
-    this.score += 100 // Example score
+    this.score += 100
+    this.update()
   }
 
+  addScore(points: number) {
+    this.score += points
+    this.update()
+  }
+
+  // Shooting methods
   canShoot(): boolean {
-    // Simple cooldown: 0.5 seconds between shots
-    return Date.now() - this.lastShotTime > 500
+    if (!this.isAlive) return false
+
+    const now = Date.now()
+    return now - this.lastShotTime >= this.shotCooldown
   }
 
-  canUseAbility(abilityId: string): boolean {
-    const cooldownEndTime = this.abilityCooldowns.get(abilityId) || 0
-    return Date.now() > cooldownEndTime
+  shoot(): boolean {
+    if (!this.canShoot()) return false
+
+    this.lastShotTime = Date.now()
+    this.update()
+    return true
   }
 
-  setAbilityCooldown(abilityId: string, durationMs = 3000) {
-    this.abilityCooldowns.set(abilityId, Date.now() + durationMs)
+  // Ability methods
+  canUseAbility(abilityType: string): boolean {
+    if (!this.isAlive) return false
+
+    const now = Date.now()
+    const cooldownEndTime = this.abilityCooldowns.get(abilityType) || 0
+    return now >= cooldownEndTime
+  }
+
+  setAbilityCooldown(abilityType: string, durationMs = 3000) {
+    const now = Date.now()
+    this.abilityCooldowns.set(abilityType, now + durationMs)
+    this.update()
+  }
+
+  // Get player stats for leaderboard
+  getStats() {
+    return {
+      name: this.name,
+      kills: this.kills,
+      deaths: this.deaths,
+      score: this.score,
+      health: this.health,
+      isAlive: this.isAlive,
+      kdr: this.deaths > 0 ? this.kills / this.deaths : this.kills,
+    }
   }
 }
