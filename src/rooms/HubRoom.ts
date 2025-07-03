@@ -2,7 +2,7 @@ import { Room, type Client, matchMaker } from "@colyseus/core"
 import { HubState } from "../schemas/HubState"
 
 export class HubRoom extends Room<HubState> {
-  maxClients = 200
+  maxClients = 100
   private lobbyUpdateInterval: any
 
   onCreate(options: any) {
@@ -138,6 +138,21 @@ export class HubRoom extends Room<HubState> {
     this.discoverAvailableLobbies()
 
     console.log("🌟 Hub room fully initialized and ready for players!")
+
+    // Set room metadata
+    this.setMetadata({
+      name: "Hub Room",
+      description: "Central hub for all players",
+      gameType: "hub",
+    })
+
+    // Send periodic updates
+    this.clock.setInterval(() => {
+      this.broadcast("hub_state_update", {
+        totalPlayers: this.clients.length,
+        timestamp: Date.now(),
+      })
+    }, 5000)
   }
 
   private formatRooms(rooms: any[]): any[] {
@@ -318,4 +333,29 @@ export class HubRoom extends Room<HubState> {
 
   // Disable auto-dispose to keep hub persistent
   autoDispose = false
+
+  onMessage(client: Client, type: string, message: any) {
+    console.log(`HubRoom received message from ${client.sessionId}:`, type, message)
+
+    switch (type) {
+      case "get_hub_state":
+        client.send("hub_state_update", {
+          totalPlayers: this.clients.length,
+          timestamp: Date.now(),
+        })
+        break
+
+      case "test":
+        client.send("test_response", {
+          message: "Hub test successful",
+          totalPlayers: this.clients.length,
+          timestamp: Date.now(),
+        })
+        break
+
+      default:
+        console.log(`Unknown message type in HubRoom: ${type}`)
+        break
+    }
+  }
 }

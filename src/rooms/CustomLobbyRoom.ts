@@ -1,4 +1,4 @@
-import { Room, type Client } from "@colyseus/core"
+import { Room, type Client } from "colyseus"
 import { LobbyState } from "../schemas/LobbyState"
 
 export class CustomLobbyRoom extends Room<LobbyState> {
@@ -18,6 +18,11 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
     // Initialize the room state
     this.setState(new LobbyState())
+
+    // Send periodic lobby updates
+    this.clock.setInterval(() => {
+      this.broadcastLobbyStats()
+    }, 3000)
 
     // Handle player joining a game
     this.onMessage("join_game", (client: Client, message: any) => {
@@ -197,420 +202,202 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       timestamp: Date.now(),
     })
 
-    console.log(`🏛️ LobbyRoom ${this.roomId} is now discoverable with readiness system active`)
-  }
-
-  async onAuth(client: Client, options: any) {
-    console.log(`🔐 CustomLobbyRoom: Authentication request from ${client.sessionId}`, options)
-
-    try {
-      // Validate options
-      if (!options || typeof options !== "object") {
-        console.log(`❌ CustomLobbyRoom: Invalid options from ${client.sessionId}`)
-        throw new Error("Invalid authentication options")
-      }
-
-      // Very permissive authentication for lobby
-      if (!options.username || typeof options.username !== "string" || options.username.trim() === "") {
-        console.log(`⚠️ CustomLobbyRoom: No valid username provided, using default for ${client.sessionId}`)
-        options.username = `Player_${client.sessionId.substring(0, 6)}`
-      }
-
-      // Sanitize username
-      options.username = options.username.trim().substring(0, 20)
-
-      // Check room capacity AFTER validation
-      if (this.clients.length >= this.maxClients) {
-        console.log(`❌ CustomLobbyRoom: Room is full (${this.clients.length}/${this.maxClients})`)
-        throw new Error("Lobby is full")
-      }
-
-      console.log(`✅ CustomLobbyRoom: Authentication successful for ${client.sessionId} (${options.username})`)
-      return {
-        username: options.username,
-        authenticated: true,
-        joinTime: Date.now(),
-      }
-    } catch (error) {
-      console.error(
-        `❌ CustomLobbyRoom: Authentication failed for ${client.sessionId}:`,
-        error instanceof Error ? error.message : String(error),
-      )
-      throw error
-    }
+    console.log(`🏛️ LobbyRoom ${this.roomId} is now ready for players!`)
   }
 
   onJoin(client: Client, options: any) {
-    console.log(`🚪 LobbyRoom: Player ${client.sessionId} (${options.username}) joined the lobby`)
+    console.log(`${client.sessionId} joined CustomLobbyRoom with options:`, options)
 
-    try {
-      const username = options.username || `Player_${client.sessionId.substr(0, 6)}`
-      this.state.addPlayer(client.sessionId, username)
+    // Add player to state
+    this.state.players.set(client.sessionId, {
+      sessionId: client.sessionId,
+      username: options.username || `Player_${client.sessionId.substring(0, 6)}`,
+      isReady: false,
+      selectedGameType: null,
+      joinedAt: Date.now(),
+    })
 
-      console.log(`✅ LobbyRoom: Player ${username} (${client.sessionId}) added to state`)
+    // Welcome the new player
+    client.send("lobby_welcome", {
+      message: "Welcome to the Lobby!",
+      playerCount: this.clients.length,
+      sessionId: client.sessionId,
+    })
 
-      // Send current state to the new player
-      const playersArray: Array<{ id: string; name: string; ready: boolean }> = []
-      this.state.players.forEach((player: any, id: string) => {
-        playersArray.push({
-          id: id,
-          name: player.name,
-          ready: player.ready,
+    // Broadcast updated stats
+    this.broadcastLobbyStats()
+  }
+
+  onMessage(client: Client, type: string, message: any) {
+    console.log(`CustomLobbyRoom received message from ${client.sessionId}:`, type, message)
+
+    const player = this.state.players.get(client.sessionId)
+    if (!player) {
+      console.log(`Player ${client.sessionId} not found in lobby state`)
+      return
+    }
+
+    switch (type) {
+      case "ready":
+        player.isReady = message.ready
+
+        // Notify all players about ready state change
+        this.broadcast("player_ready_changed", {
+          playerId: client.sessionId,
+          playerName: player.username,
+          ready: player.isReady,
         })
-      })
 
-      const gamesArray: Array<{ id: string; name: string; type: string; currentPlayers: number; maxPlayers: number }> =
-        []
-      this.state.availableGames.forEach((game: any, id: string) => {
-        gamesArray.push({
-          id: id,
-          name: game.name,
-          type: game.type,
-          currentPlayers: game.currentPlayers,
-          maxPlayers: game.maxPlayers,
-        })
-      })
-
-      console.log(
-        `📊 LobbyRoom: Sending state to ${client.sessionId} - ${playersArray.length} players, ${gamesArray.length} games`,
-      )
-
-      // Send comprehensive lobby state
-      client.send("lobby_state", {
-        players: playersArray,
-        availableGames: gamesArray,
-        lobbyId: this.roomId,
-        metadata: this.metadata,
-        playerCount: playersArray.length,
-        timestamp: Date.now(),
-      })
-
-      // Send welcome message
-      client.send("lobby_welcome", {
-        message: `Welcome to ${this.metadata.name}!`,
-        playerId: client.sessionId,
-        playerName: username,
-        playerCount: playersArray.length,
-        timestamp: Date.now(),
-      })
-
-      // Broadcast updated player count for discovery
-      this.broadcast("player_count_update", {
-        count: this.clients.length,
-        maxPlayers: this.maxClients,
-        playerCount: playersArray.length,
-        timestamp: Date.now(),
-      })
-
-      // Broadcast lobby stats update immediately after join
-      this.broadcastLobbyStats()
-
-      console.log(`📊 LobbyRoom: Now has ${this.clients.length} clients, ${playersArray.length} players`)
-
-      // Send immediate stats update to the new player
-      setTimeout(() => {
         this.broadcastLobbyStats()
-      }, 500)
-    } catch (error) {
-      console.error(`❌ LobbyRoom: Error in onJoin for ${client.sessionId}:`, error)
-      client.send("error", { message: "Failed to join lobby" })
-    }
-  }
+        this.checkForGameStart()
+        break
 
-  // CORE READINESS LOGIC - Check if all players in game session are ready
-  private checkAndStartGameSession() {
-    if (!this.gameSession) {
-      console.log(`🔍 LobbyRoom: No active game session to check readiness`)
-      return
-    }
+      case "select_game_type":
+        player.selectedGameType = message.gameType
 
-    let allReady = true
-    let readyCount = 0
-    const totalPlayers = this.gameSession.players.size
+        client.send("game_session_update", {
+          gameType: message.gameType,
+          playerCount: this.clients.length,
+        })
 
-    this.gameSession.players.forEach((playerId: string) => {
-      const player = this.state.players.get(playerId)
-      if (player) {
-        if (player.ready) {
-          readyCount++
-        } else {
-          allReady = false
-        }
-      }
-    })
+        this.broadcastLobbyStats()
+        break
 
-    console.log(`📊 LobbyRoom Game Session: Ready status - ${readyCount}/${totalPlayers} players ready`)
+      case "get_lobby_state":
+        client.send("lobby_stats_update", {
+          totalPlayers: this.clients.length,
+          readyPlayers: this.getReadyPlayerCount(),
+          gameSessionActive: this.hasActiveGameSession(),
+          gameSessionType: this.getMostSelectedGameType(),
+        })
+        break
 
-    // Broadcast ready count update with detailed info
-    this.broadcast("lobby_ready_update", {
-      readyCount,
-      totalPlayers,
-      allReady,
-      gameType: this.gameSession.gameType,
-      sessionPlayers: Array.from(this.gameSession.players),
-      timestamp: Date.now(),
-    })
-
-    // Broadcast general lobby stats
-    this.broadcastLobbyStats(readyCount)
-
-    // CRITICAL: If all players are ready and we have minimum players, create battle room
-    if (allReady && totalPlayers >= 2) {
-      console.log(`🎉 LobbyRoom: All ${totalPlayers} players are ready! Creating battle room...`)
-      this.createBattleRoomForSession()
-    } else if (allReady && totalPlayers < 2) {
-      console.log(`⚠️ LobbyRoom: All players ready but need at least 2 players (have ${totalPlayers})`)
-    } else {
-      console.log(`⏳ LobbyRoom: Waiting for more players to be ready (${readyCount}/${totalPlayers})`)
-    }
-  }
-
-  // CORE BATTLE ROOM CREATION - Only triggered from lobby when all ready
-  private async createBattleRoomForSession() {
-    if (!this.gameSession) {
-      console.error(`❌ LobbyRoom: Cannot create battle room - no active game session`)
-      return
-    }
-
-    try {
-      console.log(`🎮 LobbyRoom: Creating battle room for ${this.gameSession.players.size} ready players`)
-
-      // Notify all session players that battle room is being created
-      this.gameSession.players.forEach((playerId: string) => {
-        const client = this.clients.find((c) => c.sessionId === playerId)
-        if (client) {
-          client.send("battle_room_creating", {
-            message: "Battle room is being created...",
-            gameType: this.gameSession.gameType,
-            playerCount: this.gameSession.players.size,
-            timestamp: Date.now(),
-          })
-        }
-      })
-
-      // Create battle room options with lobby context
-      const battleRoomOptions = {
-        roomName: `Battle ${Date.now().toString().substring(8)}`,
-        gameMode: "deathmatch",
-        mapTheme: "default",
-        maxPlayers: 16,
-        fromLobby: true, // CRITICAL: Mark as created from lobby
-        lobbyId: this.roomId,
-        preReadyPlayers: Array.from(this.gameSession.players), // Pass ready players
-      }
-
-      console.log(`🎮 LobbyRoom: Battle room options:`, battleRoomOptions)
-
-      // Send battle room connection info to all ready players
-      this.gameSession.players.forEach((playerId: string) => {
-        const client = this.clients.find((c) => c.sessionId === playerId)
-        const player = this.state.players.get(playerId)
-        if (client && player) {
-          console.log(`📤 LobbyRoom: Sending battle room join message to ${player.name}`)
-          client.send("join_battle_room", {
-            gameType: "battle",
-            options: {
-              username: player.name,
-              fromLobby: true, // CRITICAL: Mark as from lobby
-              lobbyId: this.roomId,
-              characterType: "default",
+      case "get_active_lobbies":
+        // This would typically query other lobby instances
+        client.send("active_lobbies", {
+          lobbies: [
+            {
+              id: this.roomId,
+              name: "Main Lobby",
+              playerCount: this.clients.length,
+              maxPlayers: this.maxClients,
+              gameType: message.gameType || "battle",
             },
-            timestamp: Date.now(),
-          })
-        }
-      })
+          ],
+        })
+        break
 
-      // Clear the game session after battle room creation
-      console.log(`🧹 LobbyRoom: Clearing game session after battle room creation`)
-      this.gameSession = null
+      case "test":
+        client.send("test_response", {
+          message: "Lobby test successful",
+          totalPlayers: this.clients.length,
+          readyPlayers: this.getReadyPlayerCount(),
+          gameSessionActive: this.hasActiveGameSession(),
+          gameSessionType: this.getMostSelectedGameType(),
+          timestamp: Date.now(),
+        })
+        break
 
-      // Broadcast session cleared
-      this.broadcast("game_session_update", {
-        gameType: null,
-        playerCount: 0,
-        players: [],
-        timestamp: Date.now(),
-      })
+      default:
+        console.log(`Unknown message type in CustomLobbyRoom: ${type}`)
+        break
+    }
+  }
 
-      console.log(`✅ LobbyRoom: Battle room creation initiated for ready players`)
-    } catch (error) {
-      console.error(`❌ LobbyRoom: Failed to create battle room:`, error)
+  onLeave(client: Client, consented: boolean) {
+    console.log(`${client.sessionId} left CustomLobbyRoom (consented: ${consented})`)
 
-      // Notify players of the error
-      if (this.gameSession) {
-        this.gameSession.players.forEach((playerId: string) => {
-          const client = this.clients.find((c) => c.sessionId === playerId)
+    // Remove player from state
+    this.state.players.delete(client.sessionId)
+
+    // Broadcast updated stats
+    this.broadcastLobbyStats()
+  }
+
+  onDispose() {
+    console.log("CustomLobbyRoom disposed")
+  }
+
+  private broadcastLobbyStats() {
+    const stats = {
+      totalPlayers: this.clients.length,
+      readyPlayers: this.getReadyPlayerCount(),
+      gameSessionActive: this.hasActiveGameSession(),
+      gameSessionType: this.getMostSelectedGameType(),
+    }
+
+    this.broadcast("lobby_stats_update", stats)
+  }
+
+  private getReadyPlayerCount(): number {
+    let readyCount = 0
+    this.state.players.forEach((player) => {
+      if (player.isReady) readyCount++
+    })
+    return readyCount
+  }
+
+  private hasActiveGameSession(): boolean {
+    return this.getReadyPlayerCount() >= 2 && this.getMostSelectedGameType() !== null
+  }
+
+  private getMostSelectedGameType(): string | null {
+    const gameTypes = new Map<string, number>()
+
+    this.state.players.forEach((player) => {
+      if (player.selectedGameType) {
+        const count = gameTypes.get(player.selectedGameType) || 0
+        gameTypes.set(player.selectedGameType, count + 1)
+      }
+    })
+
+    let mostSelected = null
+    let maxCount = 0
+
+    gameTypes.forEach((count, gameType) => {
+      if (count > maxCount) {
+        maxCount = count
+        mostSelected = gameType
+      }
+    })
+
+    return mostSelected
+  }
+
+  private checkForGameStart() {
+    const readyCount = this.getReadyPlayerCount()
+    const gameType = this.getMostSelectedGameType()
+
+    if (readyCount >= 2 && gameType === "battle") {
+      console.log(`Starting ${gameType} game with ${readyCount} ready players`)
+
+      // Notify ready players to join battle room
+      this.state.players.forEach((player, sessionId) => {
+        if (player.isReady && player.selectedGameType === gameType) {
+          const client = this.clients.find((c) => c.sessionId === sessionId)
           if (client) {
-            client.send("error", {
-              message: "Failed to create battle room. Please try again.",
-              timestamp: Date.now(),
+            client.send("join_battle_room", {
+              gameType: gameType,
+              options: {
+                username: player.username,
+                fromLobby: true,
+              },
             })
           }
-        })
-      }
+        }
+      })
     }
   }
 
   private joinOrCreateGameSession(client: Client, gameType: string) {
-    // Create new game session if none exists
-    if (!this.gameSession) {
-      this.gameSession = {
-        gameType: gameType,
-        players: new Set(),
-        createdAt: Date.now(),
-      }
-      console.log(`🎮 LobbyRoom: Created new game session for ${gameType}`)
-    }
-
-    // Add player to session
-    this.gameSession.players.add(client.sessionId)
-
-    // Reset player ready state when joining session
-    const player = this.state.players.get(client.sessionId)
-    if (player) {
-      player.ready = false
-      console.log(`🔄 LobbyRoom: Reset ready state for ${player.name} when joining session`)
-    }
-
-    console.log(
-      `🎯 LobbyRoom: Player ${client.sessionId} joined game session (${this.gameSession.players.size} players)`,
-    )
-
-    // Broadcast session update
-    this.broadcast("game_session_update", {
-      gameType: this.gameSession.gameType,
-      playerCount: this.gameSession.players.size,
-      players: Array.from(this.gameSession.players),
-      timestamp: Date.now(),
-    })
-
-    // Send confirmation to client
-    client.send("joined_game_session", {
-      gameType: gameType,
-      playerCount: this.gameSession.players.size,
-      timestamp: Date.now(),
-    })
-
-    // Broadcast updated lobby stats
-    this.broadcastLobbyStats()
+    // Implementation for joining or creating a game session
   }
 
-  private removePlayerFromGameSession(playerId: string) {
-    if (!this.gameSession) {
-      return
-    }
-
-    this.gameSession.players.delete(playerId)
-
-    // Reset player ready state
-    const player = this.state.players.get(playerId)
-    if (player) {
-      player.ready = false
-      console.log(`🔄 LobbyRoom: Reset ready state for player ${playerId} when leaving session`)
-    }
-
-    console.log(
-      `🚪 LobbyRoom: Player ${playerId} left game session (${this.gameSession.players.size} players remaining)`,
-    )
-
-    // Remove session if empty
-    if (this.gameSession.players.size === 0) {
-      this.gameSession = null
-      console.log(`🗑️ LobbyRoom: Game session removed (no players remaining)`)
-
-      this.broadcast("game_session_update", {
-        gameType: null,
-        playerCount: 0,
-        players: [],
-        timestamp: Date.now(),
-      })
-
-      this.broadcastLobbyStats()
-      return
-    }
-
-    // Broadcast session update for active session
-    this.broadcast("game_session_update", {
-      gameType: this.gameSession.gameType,
-      playerCount: this.gameSession.players.size,
-      players: Array.from(this.gameSession.players),
-      timestamp: Date.now(),
-    })
-
-    // Check readiness after player leaves
-    this.checkAndStartGameSession()
+  private removePlayerFromGameSession(sessionId: string) {
+    // Implementation for removing a player from a game session
   }
 
-  private broadcastLobbyStats(readyPlayers?: number) {
-    let calculatedReadyPlayers = readyPlayers ?? 0 // Use nullish coalescing to ensure it's never undefined
-
-    if (readyPlayers === undefined) {
-      calculatedReadyPlayers = 0
-      this.state.players.forEach((player) => {
-        if (player.ready) calculatedReadyPlayers++
-      })
-    }
-
-    // CRITICAL: Broadcast with current player count
-    const currentPlayerCount = this.state.players.size
-
-    this.broadcast("lobby_stats_update", {
-      totalPlayers: currentPlayerCount,
-      readyPlayers: calculatedReadyPlayers,
-      gameSessionActive: !!this.gameSession,
-      timestamp: Date.now(),
-    })
-
-    console.log(`📊 LobbyRoom: Broadcasting stats - ${currentPlayerCount} total, ${calculatedReadyPlayers} ready`)
+  private checkAndStartGameSession() {
+    // Implementation for checking and starting a game session
   }
-
-  onLeave(client: Client, consented: boolean) {
-    console.log(`👋 LobbyRoom: Player ${client.sessionId} left the lobby (consented: ${consented})`)
-
-    try {
-      // Remove from game session if in one
-      this.removePlayerFromGameSession(client.sessionId)
-
-      // Remove player from any games they were in
-      this.state.removePlayerFromAllGames(client.sessionId)
-
-      // Remove player from lobby
-      const removed = this.state.removePlayer(client.sessionId)
-
-      if (removed) {
-        console.log(`✅ LobbyRoom: Player ${client.sessionId} removed from state`)
-
-        // Broadcast player left
-        this.broadcast("player_left", {
-          playerId: client.sessionId,
-          timestamp: Date.now(),
-        })
-      }
-
-      // Broadcast updated player count
-      this.broadcast("player_count_update", {
-        count: this.clients.length,
-        maxPlayers: this.maxClients,
-        timestamp: Date.now(),
-      })
-
-      // Broadcast updated lobby stats
-      this.broadcastLobbyStats()
-
-      console.log(`📊 LobbyRoom: Now has ${this.clients.length} players`)
-    } catch (error) {
-      console.error(`❌ LobbyRoom: Error in onLeave for ${client.sessionId}:`, error)
-    }
-  }
-
-  onDispose() {
-    console.log("🏛️ LobbyRoom: Room disposed")
-  }
-
-  onError(client: Client, error: any) {
-    console.error(`❌ LobbyRoom: Client ${client.sessionId} error:`, error)
-  }
-
-  // REMOVED: Disable auto-dispose to keep lobby persistent
-  // autoDispose = false;
 }

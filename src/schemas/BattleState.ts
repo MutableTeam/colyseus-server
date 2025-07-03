@@ -1,125 +1,89 @@
-import { Schema, MapSchema, type } from "@colyseus/schema"
+import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema"
 import { Player } from "./Player"
 import { Projectile } from "./Projectile"
+import { Vector3D } from "./Vector3D"
+
+// Define map objects for Three.js environment
+export class MapObject extends Schema {
+  @type("string") id = ""
+  @type("string") type = "" // Type of object (wall, platform, etc.)
+  @type(Vector3D) position = new Vector3D()
+  @type(Vector3D) scale = new Vector3D(1, 1, 1)
+  @type("number") rotation = 0 // Simple Y-axis rotation for static objects
+}
 
 export class BattleState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>()
   @type({ map: Projectile }) projectiles = new MapSchema<Projectile>()
-  @type("string") gameMode = "deathmatch"
-  @type("string") mapTheme = "default"
-  @type("number") maxPlayers = 16
+  @type([MapObject]) mapObjects = new ArraySchema<MapObject>()
+
+  // Map dimensions and properties
+  @type("number") mapWidth = 100
+  @type("number") mapLength = 100
+  @type("number") mapHeight = 50
+  @type("string") mapTheme = "default" // For different visual themes
+  @type("number") gravity = 9.8 // World gravity
+
+  // Game state
+  @type("boolean") gameStarted = false
+  @type("boolean") gameEnded = false
   @type("number") gameStartTime = 0
-  @type("boolean") gameActive = false
-  @type("number") gameTimeLimit = 600000 // 10 minutes in milliseconds
-  @type("string") roomName = ""
+  @type("number") gameEndTime = 0
+  @type("number") gameTime = 0
+  @type("number") maxGameTime = 300 // 5 minutes
+  @type("string") gameMode = "deathmatch" // deathmatch, teamDeathmatch, captureTheFlag, etc.
+  @type("number") maxPlayers = 16
 
-  // Real-time statistics for client synchronization
-  @type("number") totalPlayers = 0
-  @type("number") alivePlayers = 0
-  @type("number") spectators = 0
+  // Environment settings
+  @type("string") timeOfDay = "day" // day, night, dusk, etc.
+  @type("string") weather = "clear" // clear, rain, fog, etc.
 
-  addPlayer(id: string, name: string, characterType = "default"): Player {
+  constructor(mapWidth = 100, mapLength = 100, mapHeight = 50) {
+    super()
+    this.mapWidth = mapWidth
+    this.mapLength = mapLength
+    this.mapHeight = mapHeight
+  }
+
+  // Added missing methods for player and projectile management
+  addPlayer(sessionId: string, name: string, characterType: string, fromLobby: boolean) {
     const player = new Player()
-    player.id = id
+    player.id = sessionId // Use id for sessionId
     player.name = name
     player.characterType = characterType
-    player.score = 0
-    player.isAlive = true
-    player.health = player.maxHealth
-
-    // Set initial position (you might want to randomize this)
-    player.position.x = Math.random() * 20 - 10
-    player.position.y = 0
-    player.position.z = Math.random() * 20 - 10
-
-    this.players.set(id, player)
-    this.updatePlayerCounts()
+    player.score = 0 // Initialize score
+    player.isAlive = true // Initialize isAlive
+    this.players.set(sessionId, player)
     return player
   }
 
-  removePlayer(id: string): boolean {
-    if (this.players.has(id)) {
-      this.players.delete(id)
-      this.updatePlayerCounts()
-      return true
-    }
-    return false
+  removePlayer(sessionId: string) {
+    return this.players.delete(sessionId)
   }
 
-  addProjectile(
-    id: string,
-    playerId: string,
-    position: { x: number; y: number; z: number },
-    direction: { x: number; y: number; z: number },
-    weaponType = "default",
-  ): Projectile {
+  addProjectile(playerId: string, position: any, direction: any, weaponType: string) {
     const projectile = new Projectile()
-    projectile.id = id
-    projectile.playerId = playerId
-    projectile.weaponType = weaponType
-
-    // Set position
+    projectile.id = `${playerId}_${Date.now()}`
+    projectile.playerId = playerId // Corrected: Assign to playerId
     projectile.position.x = position.x
     projectile.position.y = position.y
     projectile.position.z = position.z
-
-    // Set direction and velocity
-    projectile.direction.x = direction.x
-    projectile.direction.y = direction.y
-    projectile.direction.z = direction.z
-    projectile.setDirection(direction.x, direction.y, direction.z)
-
-    this.projectiles.set(id, projectile)
+    projectile.direction.x = direction.x // Corrected: Assign to direction.x
+    projectile.direction.y = direction.y // Corrected: Assign to direction.y
+    projectile.direction.z = direction.z // Corrected: Assign to direction.z
+    projectile.weaponType = weaponType // Corrected: Assign to weaponType
+    this.projectiles.set(projectile.id, projectile)
     return projectile
   }
 
-  usePlayerAbility(playerId: string, abilityId: string): boolean {
-    const player = this.players.get(playerId)
-    if (!player || !player.canUseAbility(abilityId)) {
-      return false
+  usePlayerAbility(sessionId: string, abilityType: string) {
+    const player = this.players.get(sessionId)
+    if (player && player.isAlive) {
+      // Implement actual ability logic and cooldowns here
+      // For now, just return true to simulate success
+      console.log(`Player ${player.name} used ability: ${abilityType}`)
+      return true
     }
-
-    player.setAbilityCooldown(abilityId)
-    return true
-  }
-
-  updatePlayerCounts() {
-    this.totalPlayers = this.players.size
-    this.alivePlayers = 0
-    this.spectators = 0
-
-    this.players.forEach((player) => {
-      if (player.isAlive) {
-        this.alivePlayers++
-      } else {
-        this.spectators++
-      }
-    })
-  }
-
-  update(deltaTime: number) {
-    // Update all projectiles
-    this.projectiles.forEach((projectile, id) => {
-      projectile.update(deltaTime)
-      if (!projectile.active) {
-        this.projectiles.delete(id)
-      }
-    })
-
-    // Update player cooldowns
-    this.players.forEach((player) => {
-      player.updateCooldowns()
-    })
-  }
-
-  getPlayerStats() {
-    return {
-      totalPlayers: this.totalPlayers,
-      alivePlayers: this.alivePlayers,
-      spectators: this.spectators,
-      gameActive: this.gameActive,
-      gameMode: this.gameMode,
-      roomName: this.roomName,
-    }
+    return false
   }
 }

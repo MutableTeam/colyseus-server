@@ -3,8 +3,8 @@ import { Vector3D } from "./Vector3D"
 import { Quaternion } from "./Quaternion"
 
 export class Player extends Schema {
-  @type("string") id = ""
-  @type("string") name = ""
+  @type("string") sessionId: string
+  @type("string") username: string
   @type("string") characterType = "default"
   @type("string") modelType = "default" // For different 3D models
 
@@ -25,13 +25,15 @@ export class Player extends Schema {
   @type("number") health = 100
   @type("number") maxHealth = 100
   @type("number") kills = 0
-  // REMOVED: ready field - only exists in lobby, not in battle room
+  @type("number") deaths = 0
+  @type("number") level = 1
+  @type("number") experience = 0
   @type("boolean") isRespawning = false
   @type("number") respawnTime = 3 // seconds
 
   // Added missing properties for BattleRoom
-  @type("number") score = 0
   @type("boolean") isAlive = true
+  @type("number") score = 0
 
   // Combat
   @type("number") lastShotTime = 0
