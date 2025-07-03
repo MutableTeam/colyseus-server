@@ -1,30 +1,36 @@
 import { Schema, type } from "@colyseus/schema"
 import { Vector3D } from "./Vector3D"
-import { Quaternion } from "./Quaternion"
 
 export class Projectile extends Schema {
   @type("string") id = ""
   @type("string") ownerId = ""
-  @type("string") type = "default"
-
-  // Added missing properties
-  @type("string") playerId = "" // Owner of the projectile
-  @type(Vector3D) direction = new Vector3D() // Direction of the projectile
-  @type("string") weaponType = "default" // Type of weapon that fired it
-
-  // 3D position and movement
   @type(Vector3D) position = new Vector3D()
-  @type(Vector3D) velocity = new Vector3D()
-  @type(Quaternion) rotation = new Quaternion()
+  @type(Vector3D) direction = new Vector3D()
+  @type("number") speed = 50
+  @type("number") damage = 25
+  @type("boolean") isActive = true
+  @type("number") createdAt = 0
+  @type("number") distanceTraveled = 0
+  @type("string") projectileType = "bullet"
 
-  // Projectile properties
-  @type("number") damage = 10
-  @type("number") radius = 0.5
-  @type("number") lifetime = 2 // seconds
-  @type("number") speed = 20
-  @type("number") gravity = 0 // Some projectiles might be affected by gravity
+  constructor() {
+    super()
+    this.createdAt = Date.now()
+  }
 
-  // Visual effects (for client rendering)
-  @type("string") effectType = "default" // For different visual effects
-  @type("number") scale = 1
+  update(deltaTime: number) {
+    if (!this.isActive) return
+
+    const moveDistance = this.speed * deltaTime
+
+    this.position.x += this.direction.x * moveDistance
+    this.position.y += this.direction.y * moveDistance
+    this.position.z += this.direction.z * moveDistance
+
+    this.distanceTraveled += moveDistance
+  }
+
+  deactivate() {
+    this.isActive = false
+  }
 }

@@ -66,11 +66,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
       let activeLobbies
       if (gameType) {
-        // Get lobbies for specific game type from local state
         activeLobbies = this.state.getActiveLobbiesByGameType(gameType)
         console.log(`🔍 Found ${activeLobbies.length} active lobbies for game type: ${gameType}`)
       } else {
-        // Get all active lobbies from local state
         activeLobbies = this.state.getAllActiveLobbies()
         console.log(`🔍 Found ${activeLobbies.length} total active lobbies`)
       }
@@ -105,7 +103,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
         // Update player ready state
         const oldReadyState = player.ready
-        player.ready = message.ready
+        player.setReady(message.ready)
 
         console.log(
           `✅ LobbyRoom: Player ${client.sessionId} (${player.name}) ready state changed from ${oldReadyState} to ${player.ready}`,
@@ -147,11 +145,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
       const player = this.state.players.get(client.sessionId)
       const playerCount = this.state.players.size
-      let readyCount = 0
-
-      this.state.players.forEach((p) => {
-        if (p.ready) readyCount++
-      })
+      const readyCount = this.state.readyPlayers
 
       // Send comprehensive test response
       client.send("test_response", {
@@ -166,7 +160,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         readyPlayers: readyCount,
         gameSessionActive: !!this.gameSession,
         gameSessionType: this.gameSession?.gameType || null,
-        gameSessionPlayers: this.gameSession?.players.size || 0,
+        gameSessionPlayers: this.gameSession?.players?.size || 0,
         connectedClients: this.clients.length,
       })
 
@@ -204,7 +198,8 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     console.log(`${client.sessionId} joined CustomLobbyRoom with options:`, options)
 
     // Add player to state
-    this.state.addPlayer(client.sessionId, options.username || `Player_${client.sessionId.substring(0, 6)}`)
+    const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
+    this.state.addPlayer(client.sessionId, username, client.sessionId)
 
     // Welcome the new player
     client.send("lobby_welcome", {
@@ -237,7 +232,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
   private broadcastLobbyStats() {
     const stats = {
       totalPlayers: this.clients.length,
-      readyPlayers: this.getReadyPlayerCount(),
+      readyPlayers: this.state.readyPlayers,
       gameSessionActive: !!this.gameSession,
       gameSessionType: this.gameSession?.gameType || null,
       timestamp: Date.now(),
@@ -247,11 +242,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
   }
 
   private getReadyPlayerCount(): number {
-    let readyCount = 0
-    this.state.players.forEach((player) => {
-      if (player.ready) readyCount++
-    })
-    return readyCount
+    return this.state.readyPlayers
   }
 
   private joinOrCreateGameSession(client: Client, gameType: string) {
@@ -276,7 +267,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     // Update player's selected game type in lobby state
     const player = this.state.players.get(client.sessionId)
     if (player) {
-      player.selectedGameType = gameType
+      player.selectGameType(gameType)
     }
 
     // Notify client about joining game session
@@ -304,13 +295,13 @@ export class CustomLobbyRoom extends Room<LobbyState> {
   private checkAndStartGameSession() {
     if (!this.gameSession) return
 
-    const readyPlayers = Array.from(this.gameSession.players.values()).filter((p) => p.ready)
+    const readyPlayers = Array.from(this.gameSession.players.values()).filter((p: any) => p.ready)
 
     if (readyPlayers.length >= 2) {
       console.log(`🚀 Starting game session with ${readyPlayers.length} ready players`)
 
       // Notify all ready players to join the actual game room
-      readyPlayers.forEach((player) => {
+      readyPlayers.forEach((player: any) => {
         const client = this.clients.find((c) => c.sessionId === player.sessionId)
         if (client) {
           client.send("start_game", {

@@ -2,15 +2,22 @@ import { Room, type Client, matchMaker } from "@colyseus/core"
 import { HubState } from "../schemas/HubState"
 
 export class HubRoom extends Room<HubState> {
-  maxClients = 200
+  maxClients = 100
   private lobbyUpdateInterval: any
 
   onCreate(options: any) {
-    console.log("🏠 HubRoom created - Central hub is now online!", options)
-    console.log(`🏠 HubRoom: maxClients set to ${this.maxClients}`)
+    console.log("🏠 HubRoom created!", options)
 
+    // Set metadata
+    this.setMetadata({
+      name: "Main Hub",
+      gameType: "hub",
+      isPublic: true,
+      createdAt: Date.now(),
+    })
+
+    // Initialize the room state
     this.setState(new HubState())
-    this.state.serverStatus = "online"
 
     // Handle request for available lobbies
     this.onMessage("get_lobbies", async (client: Client, message: any) => {
@@ -88,6 +95,51 @@ export class HubRoom extends Room<HubState> {
       })
     })
 
+    // Handle player status updates
+    this.onMessage("update_status", (client: Client, message: any) => {
+      const player = this.state.players.get(client.sessionId)
+      if (player) {
+        player.status = message.status
+        player.updateActivity()
+        this.state.updateStats()
+      }
+    })
+
+    // Handle room navigation requests
+    this.onMessage("join_room", (client: Client, message: any) => {
+      const { roomType, options } = message
+      console.log(`🚪 Player ${client.sessionId} requesting to join ${roomType}`)
+
+      client.send("room_join_response", {
+        roomType,
+        success: true,
+        options,
+      })
+    })
+
+    // Handle getting server stats
+    this.onMessage("get_server_stats", (client: Client) => {
+      client.send("server_stats", {
+        totalPlayers: this.state.totalPlayers,
+        onlinePlayers: this.state.onlinePlayers,
+        roomCounts: this.state.roomCounts,
+        serverStatus: this.state.serverStatus,
+        announcements: this.state.announcements,
+      })
+    })
+
+    // Handle test messages
+    this.onMessage("test", (client: Client, message: any) => {
+      console.log(`🧪 HubRoom: Test message from ${client.sessionId}:`, message)
+
+      client.send("test_response", {
+        message: "Hub test successful",
+        totalPlayers: this.state.totalPlayers,
+        onlinePlayers: this.state.onlinePlayers,
+        timestamp: Date.now(),
+      })
+    })
+
     // Handle test message with enhanced response
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`🧪 Hub: Test message from ${client.sessionId}:`, message)
@@ -133,6 +185,15 @@ export class HubRoom extends Room<HubState> {
     this.lobbyUpdateInterval = this.setSimulationInterval(() => {
       this.discoverAvailableLobbies()
     }, 10000) // Update every 10 seconds
+
+    // Periodic stats broadcast
+    this.setSimulationInterval(() => {
+      this.broadcast("hub_stats_update", {
+        totalPlayers: this.state.totalPlayers,
+        onlinePlayers: this.state.onlinePlayers,
+        timestamp: Date.now(),
+      })
+    }, 5000) // Every 5 seconds
 
     // Initial lobby discovery
     this.discoverAvailableLobbies()
@@ -229,74 +290,60 @@ export class HubRoom extends Room<HubState> {
   }
 
   onJoin(client: Client, options: any) {
-    console.log(`🚪 HubRoom: Player ${client.sessionId} entering the hub`)
+    console.log(`${client.sessionId} joined HubRoom with options:`, options)
+
+    // Add player to state
+    const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
+    this.state.addPlayer(client.sessionId, username, client.sessionId)
+
+    // Welcome the new player
+    client.send("hub_welcome", {
+      message: "Welcome to the Hub!",
+      playerCount: this.clients.length,
+      sessionId: client.sessionId,
+    })
+
+    // Send current server stats
+    client.send("server_stats", {
+      totalPlayers: this.state.totalPlayers,
+      onlinePlayers: this.state.onlinePlayers,
+      roomCounts: this.state.roomCounts,
+      serverStatus: this.state.serverStatus,
+      announcements: this.state.announcements,
+    })
+
     console.log(`📊 HubRoom: Client count before adding to state: ${this.clients.length}`)
 
-    const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
+    console.log(`📊 HubRoom: Player count after join: ${this.state.totalPlayers}`)
+    console.log(`📊 HubRoom: WebSocket clients: ${this.clients.length}`)
 
-    try {
-      // Add player to state and get updated total count
-      const totalPlayers = this.state.addPlayer(client.sessionId, username)
+    // CRITICAL: Force state change notification
+    this.state.lastUpdate = Date.now()
 
-      console.log(`📊 HubRoom: Player count after join: ${totalPlayers}`)
-      console.log(`📊 HubRoom: WebSocket clients: ${this.clients.length}`)
-
-      // CRITICAL: Force state change notification
-      this.state.lastUpdate = Date.now()
-
-      // Send welcome message with hub status
-      client.send("hub_welcome", {
-        message: "Welcome to the game hub!",
-        totalPlayers: totalPlayers,
-        serverStatus: this.state.serverStatus,
-        availableLobbies: this.state.getAllAvailableLobbies(),
-        timestamp: Date.now(),
-      })
-
-      // Broadcast player count update to all clients
-      this.broadcast("player_count_update", {
-        totalPlayers: totalPlayers,
-        timestamp: Date.now(),
-      })
-
-      // Also send current state to the new client
-      client.send("hub_state_update", {
-        totalPlayers: totalPlayers,
-        serverStatus: this.state.serverStatus,
-        timestamp: Date.now(),
-      })
-
-      console.log(`✅ HubRoom: Successfully added player ${username} (${client.sessionId})`)
-      console.log(`📊 HubRoom: Hub now has ${totalPlayers} players`)
-    } catch (error) {
-      console.error(`❌ HubRoom: Error in onJoin for ${client.sessionId}:`, error)
-      // Don't throw here as it might cause the 4002 error
-    }
+    console.log(`✅ HubRoom: Successfully added player ${username} (${client.sessionId})`)
+    console.log(`📊 HubRoom: Hub now has ${this.state.totalPlayers} players`)
   }
 
   onLeave(client: Client, consented: boolean) {
-    console.log(`👋 HubRoom: Player ${client.sessionId} left the hub (consented: ${consented})`)
+    console.log(`${client.sessionId} left HubRoom (consented: ${consented})`)
+
+    // Remove player from state
+    this.state.removePlayer(client.sessionId)
+
     console.log(`📊 HubRoom: Client count before removal: ${this.clients.length}`)
 
-    try {
-      // Remove player from state and get updated total count
-      const result = this.state.removePlayer(client.sessionId)
+    console.log(`📊 HubRoom: Player count after leave: ${this.state.totalPlayers}`)
 
-      console.log(`📊 HubRoom: Player count after leave: ${result.totalPlayers}`)
+    // CRITICAL: Force state change notification
+    this.state.lastUpdate = Date.now()
 
-      // CRITICAL: Force state change notification
-      this.state.lastUpdate = Date.now()
+    // Broadcast player count update to remaining clients
+    this.broadcast("player_count_update", {
+      totalPlayers: this.state.totalPlayers,
+      timestamp: Date.now(),
+    })
 
-      // Broadcast player count update to remaining clients
-      this.broadcast("player_count_update", {
-        totalPlayers: result.totalPlayers,
-        timestamp: Date.now(),
-      })
-
-      console.log(`📊 HubRoom: Hub now has ${result.totalPlayers} players`)
-    } catch (error) {
-      console.error(`❌ HubRoom: Error in onLeave for ${client.sessionId}:`, error)
-    }
+    console.log(`📊 HubRoom: Hub now has ${this.state.totalPlayers} players`)
   }
 
   onDispose() {

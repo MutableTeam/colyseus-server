@@ -30,57 +30,202 @@ export class BattleState extends Schema {
   @type("number") gameStartTime = 0
   @type("number") gameEndTime = 0
   @type("number") gameTime = 0
-  @type("number") maxGameTime = 300 // 5 minutes
+  @type("number") maxGameTime = 600 // 10 minutes in seconds
   @type("string") gameMode = "deathmatch" // deathmatch, teamDeathmatch, captureTheFlag, etc.
-
-  // Environment settings
-  @type("string") timeOfDay = "day" // day, night, dusk, etc.
-  @type("string") weather = "clear" // clear, rain, fog, etc.
+  @type("string") mapName = "default"
+  @type("boolean") gameActive = true
+  @type("number") killLimit = 25
+  @type("string") winner = ""
+  @type({ array: Vector3D }) spawnPoints = new ArraySchema<Vector3D>()
+  @type("number") lastUpdate = 0
 
   constructor(mapWidth = 100, mapLength = 100, mapHeight = 50) {
     super()
     this.mapWidth = mapWidth
     this.mapLength = mapLength
     this.mapHeight = mapHeight
+    this.gameTime = 0
+    this.gameActive = true
+    this.lastUpdate = Date.now()
+    this.initializeSpawnPoints()
   }
 
-  // Added missing methods for player and projectile management
-  addPlayer(sessionId: string, name: string, characterType: string, fromLobby: boolean) {
+  private initializeSpawnPoints() {
+    // Add default spawn points for the battle arena
+    const spawnPositions = [
+      { x: 10, y: 0, z: 10 },
+      { x: -10, y: 0, z: 10 },
+      { x: 10, y: 0, z: -10 },
+      { x: -10, y: 0, z: -10 },
+      { x: 0, y: 0, z: 15 },
+      { x: 0, y: 0, z: -15 },
+      { x: 15, y: 0, z: 0 },
+      { x: -15, y: 0, z: 0 },
+    ]
+
+    spawnPositions.forEach((pos) => {
+      const spawnPoint = new Vector3D()
+      spawnPoint.x = pos.x
+      spawnPoint.y = pos.y
+      spawnPoint.z = pos.z
+      this.spawnPoints.push(spawnPoint)
+    })
+  }
+
+  addPlayer(sessionId: string, name: string): Player {
     const player = new Player()
-    player.id = sessionId // Use id for sessionId
+    player.id = sessionId
+    player.sessionId = sessionId
     player.name = name
-    player.characterType = characterType
-    player.score = 0 // Initialize score
-    player.isAlive = true // Initialize isAlive
+    player.isAlive = true
+    player.health = player.maxHealth
+
+    // Set spawn position
+    const spawnPoint = this.getRandomSpawnPoint()
+    player.position.x = spawnPoint.x
+    player.position.y = spawnPoint.y
+    player.position.z = spawnPoint.z
+
     this.players.set(sessionId, player)
     return player
   }
 
-  removePlayer(sessionId: string) {
-    return this.players.delete(sessionId)
+  removePlayer(sessionId: string): boolean {
+    if (this.players.has(sessionId)) {
+      this.players.delete(sessionId)
+      return true
+    }
+    return false
   }
 
-  addProjectile(playerId: string, position: any, direction: any, weaponType: string) {
+  createProjectile(
+    id: string,
+    ownerId: string,
+    position: Vector3D,
+    direction: Vector3D,
+    speed = 50,
+    damage = 25,
+  ): Projectile {
     const projectile = new Projectile()
-    projectile.id = `${playerId}_${Date.now()}`
-    projectile.playerId = playerId // Corrected: Assign to playerId
+    projectile.id = id
+    projectile.ownerId = ownerId
     projectile.position.x = position.x
     projectile.position.y = position.y
     projectile.position.z = position.z
-    projectile.direction.x = direction.x // Corrected: Assign to direction.x
-    projectile.direction.y = direction.y // Corrected: Assign to direction.y
-    projectile.direction.z = direction.z // Corrected: Assign to direction.z
-    projectile.weaponType = weaponType // Corrected: Assign to weaponType
-    this.projectiles.set(projectile.id, projectile)
+    projectile.direction.x = direction.x
+    projectile.direction.y = direction.y
+    projectile.direction.z = direction.z
+    projectile.speed = speed
+    projectile.damage = damage
+    projectile.isActive = true
+
+    this.projectiles.set(id, projectile)
     return projectile
   }
 
-  usePlayerAbility(sessionId: string, abilityType: string) {
+  removeProjectile(id: string): boolean {
+    if (this.projectiles.has(id)) {
+      this.projectiles.delete(id)
+      return true
+    }
+    return false
+  }
+
+  getRandomSpawnPoint(): Vector3D {
+    const randomIndex = Math.floor(Math.random() * this.spawnPoints.length)
+    return this.spawnPoints[randomIndex]
+  }
+
+  updateGameTime(deltaTime: number) {
+    if (this.gameActive) {
+      this.gameTime += deltaTime
+      if (this.gameTime >= this.maxGameTime) {
+        this.endGame()
+      }
+    }
+    this.lastUpdate = Date.now()
+  }
+
+  checkWinCondition(): string | null {
+    if (!this.gameActive) return this.winner
+
+    // Check kill limit
+    let topPlayer: Player | null = null
+    let topKills = 0
+
+    this.players.forEach((player) => {
+      if (player.kills > topKills) {
+        topKills = player.kills
+        topPlayer = player
+      }
+    })
+
+    if (topKills >= this.killLimit && topPlayer) {
+      this.winner = topPlayer.name
+      this.endGame()
+      return this.winner
+    }
+
+    return null
+  }
+
+  endGame() {
+    this.gameActive = false
+    if (!this.winner) {
+      // Find player with most kills
+      let topPlayer: Player | null = null
+      let topKills = 0
+
+      this.players.forEach((player) => {
+        if (player.kills > topKills) {
+          topKills = player.kills
+          topPlayer = player
+        }
+      })
+
+      this.winner = topPlayer?.name || "No Winner"
+    }
+  }
+
+  getLeaderboard(): Array<{ name: string; kills: number; deaths: number; score: number }> {
+    const leaderboard: Array<{ name: string; kills: number; deaths: number; score: number }> = []
+
+    this.players.forEach((player) => {
+      leaderboard.push({
+        name: player.name,
+        kills: player.kills,
+        deaths: player.deaths,
+        score: player.score,
+      })
+    })
+
+    // Sort by kills, then by score
+    return leaderboard.sort((a, b) => {
+      if (a.kills !== b.kills) {
+        return b.kills - a.kills
+      }
+      return b.score - a.score
+    })
+  }
+
+  getAlivePlayers(): Player[] {
+    const alivePlayers: Player[] = []
+    this.players.forEach((player) => {
+      if (player.isAlive) {
+        alivePlayers.push(player)
+      }
+    })
+    return alivePlayers
+  }
+
+  respawnPlayer(sessionId: string): boolean {
     const player = this.players.get(sessionId)
-    if (player && player.isAlive) {
-      // Implement actual ability logic and cooldowns here
-      // For now, just return true to simulate success
-      console.log(`Player ${player.name} used ability: ${abilityType}`)
+    if (player && !player.isAlive) {
+      const spawnPoint = this.getRandomSpawnPoint()
+      player.position.x = spawnPoint.x
+      player.position.y = spawnPoint.y
+      player.position.z = spawnPoint.z
+      player.respawn()
       return true
     }
     return false
