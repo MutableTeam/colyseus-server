@@ -105,7 +105,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
         // Update player ready state
         const oldReadyState = player.ready
-        player.ready = message.ready
+        player.setReady(message.ready) // Use the setReady method
 
         console.log(
           `✅ LobbyRoom: Player ${client.sessionId} (${player.name}) ready state changed from ${oldReadyState} to ${player.ready}`,
@@ -131,6 +131,11 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     this.onMessage("select_game_type", (client: Client, message: any) => {
       const { gameType } = message
       console.log(`🎮 Player ${client.sessionId} selected game type: ${gameType}`)
+
+      const player = this.state.players.get(client.sessionId)
+      if (player) {
+        player.selectGameType(gameType) // Use the selectGameType method
+      }
 
       // Start or join a game session for this game type
       this.joinOrCreateGameSession(client, gameType)
@@ -205,7 +210,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
     // Add player to state
     const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
-    this.state.addPlayer(client.sessionId, username, client.sessionId)
+    this.state.addPlayer(client.sessionId, username, client.sessionId) // Pass sessionId as third argument
 
     // Welcome the new player
     client.send("lobby_welcome", {

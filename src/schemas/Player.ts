@@ -4,6 +4,7 @@ import { Quaternion } from "./Quaternion"
 
 export class Player extends Schema {
   @type("string") id = ""
+  @type("string") sessionId = "" // Added sessionId for consistency with LobbyPlayer
   @type("string") name = ""
   @type("string") characterType = "default"
   @type("string") modelType = "default" // For different 3D models
@@ -25,11 +26,13 @@ export class Player extends Schema {
   @type("number") health = 100
   @type("number") maxHealth = 100
   @type("number") kills = 0
-  // REMOVED: ready field - only exists in lobby, not in battle room
+  @type("number") deaths = 0 // Added missing deaths property
+  @type("number") level = 1
+  @type("number") experience = 0
   @type("boolean") isRespawning = false
   @type("number") respawnTime = 3 // seconds
 
-  // Added missing properties for BattleRoom
+  // Battle room specific properties
   @type("number") score = 0
   @type("boolean") isAlive = true
 
@@ -41,6 +44,17 @@ export class Player extends Schema {
 
   // Animation state - useful for client-side animation
   @type("string") animationState = "idle" // idle, running, jumping, attacking, etc.
+
+  // Lobby specific properties (moved from LobbyPlayer to Player for simplicity)
+  @type("boolean") ready = false // Added missing ready property
+  @type("string") selectedGameType = "" // Added missing selectedGameType property
+  @type("number") joinedAt = 0 // Added joinedAt for consistency
+  @type("string") status = "connected" // Added status for consistency
+
+  constructor() {
+    super()
+    this.joinedAt = Date.now()
+  }
 
   canShoot(): boolean {
     const now = Date.now()
@@ -85,5 +99,49 @@ export class Player extends Schema {
     forward.z = -Math.cos(angle)
 
     return forward
+  }
+
+  takeDamage(damage: number): boolean {
+    this.health = Math.max(0, this.health - damage)
+    if (this.health <= 0 && this.isAlive) {
+      this.isAlive = false
+      this.deaths++
+      this.isRespawning = true
+      return true // Player died
+    }
+    return false // Player still alive
+  }
+
+  heal(amount: number) {
+    this.health = Math.min(this.maxHealth, this.health + amount)
+  }
+
+  respawn() {
+    this.health = this.maxHealth
+    this.isAlive = true
+    this.isRespawning = false
+    this.position.x = 0
+    this.position.y = 0
+    this.position.z = 0
+  }
+
+  addKill() {
+    this.kills++
+    this.score += 100 // 100 points per kill
+    this.experience += 50 // 50 XP per kill
+  }
+
+  addScore(points: number) {
+    this.score += points
+  }
+
+  // Method to set player ready state
+  setReady(isReady: boolean) {
+    this.ready = isReady
+  }
+
+  // Method to set selected game type
+  selectGameType(gameType: string) {
+    this.selectedGameType = gameType
   }
 }
