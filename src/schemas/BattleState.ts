@@ -43,4 +43,46 @@ export class BattleState extends Schema {
     this.mapLength = mapLength
     this.mapHeight = mapHeight
   }
+
+  // Added missing methods for player and projectile management
+  addPlayer(sessionId: string, name: string, characterType: string, fromLobby: boolean) {
+    const player = new Player()
+    player.id = sessionId // Use id for sessionId
+    player.name = name
+    player.characterType = characterType
+    player.score = 0 // Initialize score
+    player.isAlive = true // Initialize isAlive
+    this.players.set(sessionId, player)
+    return player
+  }
+
+  removePlayer(sessionId: string) {
+    return this.players.delete(sessionId)
+  }
+
+  addProjectile(playerId: string, position: any, direction: any, weaponType: string) {
+    const projectile = new Projectile()
+    projectile.id = `${playerId}_${Date.now()}`
+    projectile.playerId = playerId
+    projectile.position.x = position.x
+    projectile.position.y = position.y
+    projectile.position.z = position.z
+    projectile.direction.x = direction.x
+    projectile.direction.y = direction.y
+    projectile.direction.z = direction.z
+    projectile.weaponType = weaponType
+    this.projectiles.set(projectile.id, projectile)
+    return projectile
+  }
+
+  usePlayerAbility(sessionId: string, abilityType: string) {
+    const player = this.players.get(sessionId)
+    if (player && player.isAlive) {
+      // Implement actual ability logic and cooldowns here
+      // For now, just return true to simulate success
+      console.log(`Player ${player.name} used ability: ${abilityType}`)
+      return true
+    }
+    return false
+  }
 }

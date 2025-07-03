@@ -31,14 +31,13 @@ export class BattleRoom extends Room<BattleState> {
     this.state.mapTheme = options.mapTheme || "default"
     this.state.gameStarted = false
 
-    // Handle test message for debugging with enhanced response
+    // Handle test message for debugging
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`🧪 BattleRoom: Test message from ${client.sessionId}:`, message)
 
       const player = this.state.players.get(client.sessionId)
       const playerCount = this.state.players.size
 
-      // Send comprehensive test response
       client.send("test_response", {
         message: "Battle room test response",
         timestamp: Date.now(),
@@ -50,13 +49,11 @@ export class BattleRoom extends Room<BattleState> {
         gameStarted: this.gameStarted,
         gameMode: this.state.gameMode,
         mapTheme: this.state.mapTheme,
-        connectedClients: this.clients.length,
+        connectedClients: this.clients.length, // Added connectedClients
       })
 
       // Also broadcast current stats
       this.broadcastBattleStats()
-
-      console.log(`📊 BattleRoom: Sent test response with ${playerCount} players to ${client.sessionId}`)
     })
 
     // Handle ping/heartbeat messages
@@ -84,6 +81,7 @@ export class BattleRoom extends Room<BattleState> {
     // Handle player actions
     this.onMessage("player_action", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
+      const abilityType = message.abilityType // Moved this line to the top level
       if (player) {
         // Handle different action types
         switch (message.type) {
@@ -94,7 +92,7 @@ export class BattleRoom extends Room<BattleState> {
             this.handlePlayerJump(client, message)
             break
           case "ability":
-            this.handlePlayerAbility(client, message)
+            this.handlePlayerAbility(client, abilityType) // Updated to use abilityType
             break
         }
       }
@@ -130,7 +128,8 @@ export class BattleRoom extends Room<BattleState> {
         characterType: options.characterType || "default",
         fromLobby: options.fromLobby || false,
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Explicitly type error as any
       console.error(`❌ BattleRoom: Authentication failed for ${client.sessionId}:`, error.message)
       throw error
     }
@@ -142,7 +141,7 @@ export class BattleRoom extends Room<BattleState> {
     try {
       const username = options.username || `Warrior_${client.sessionId.substring(0, 6)}`
 
-      // Add player to battle state
+      // Add player to battle state using the method on BattleState
       const player = this.state.addPlayer(
         client.sessionId,
         username,
@@ -196,7 +195,8 @@ export class BattleRoom extends Room<BattleState> {
       if (options.fromLobby && playerCount >= 2 && !this.gameStarted) {
         this.scheduleGameStart()
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Explicitly type error as any
       console.error(`❌ BattleRoom: Error in onJoin for ${client.sessionId}:`, error)
       client.send("error", { message: "Failed to join battle room" })
     }
@@ -254,7 +254,7 @@ export class BattleRoom extends Room<BattleState> {
     const player = this.state.players.get(client.sessionId)
     if (!player || !this.gameStarted) return
 
-    // Create projectile
+    // Create projectile using the method on BattleState
     const projectile = this.state.addProjectile(
       client.sessionId,
       message.position,
@@ -290,9 +290,10 @@ export class BattleRoom extends Room<BattleState> {
     )
   }
 
-  private handlePlayerAbility(client: Client, message: any) {
-    const abilityType = message.abilityType
+  private handlePlayerAbility(client: Client, abilityType: any) {
+    // Updated parameter type to any
     const player = this.state.players.get(client.sessionId)
+    // Use the method on BattleState
     const success = player && this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
 
     if (success) {
@@ -300,7 +301,7 @@ export class BattleRoom extends Room<BattleState> {
       this.broadcast("player_used_ability", {
         playerId: client.sessionId,
         abilityType: abilityType,
-        position: message.position,
+        position: player.position, // Added position for context
         timestamp: Date.now(),
       })
     } else {
@@ -332,8 +333,8 @@ export class BattleRoom extends Room<BattleState> {
           w: player.rotation.w,
         },
         health: player.health,
-        score: player.score,
-        isAlive: player.isAlive,
+        score: player.score, // Access score property
+        isAlive: player.isAlive, // Access isAlive property
       })
     })
     return players
@@ -364,7 +365,7 @@ export class BattleRoom extends Room<BattleState> {
     console.log(`👋 BattleRoom: Player ${client.sessionId} left the battle (consented: ${consented})`)
 
     try {
-      // Remove player from battle state
+      // Remove player from battle state using the method on BattleState
       const removed = this.state.removePlayer(client.sessionId)
 
       if (removed) {
@@ -387,7 +388,8 @@ export class BattleRoom extends Room<BattleState> {
       if (this.gameStarted && remainingPlayers < 2) {
         this.endGame("Not enough players")
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Explicitly type error as any
       console.error(`❌ BattleRoom: Error in onLeave for ${client.sessionId}:`, error)
     }
   }
@@ -428,6 +430,7 @@ export class BattleRoom extends Room<BattleState> {
   }
 
   onError(client: Client, error: any) {
+    // Explicitly type error as any
     console.error(`❌ BattleRoom: Client ${client.sessionId} error:`, error)
   }
 }

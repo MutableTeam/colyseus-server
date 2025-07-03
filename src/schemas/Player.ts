@@ -29,6 +29,10 @@ export class Player extends Schema {
   @type("boolean") isRespawning = false
   @type("number") respawnTime = 3 // seconds
 
+  // Added missing properties for BattleRoom
+  @type("number") score = 0
+  @type("boolean") isAlive = true
+
   // Combat
   @type("number") lastShotTime = 0
   @type({ array: "string" }) abilities = new Array<string>()
