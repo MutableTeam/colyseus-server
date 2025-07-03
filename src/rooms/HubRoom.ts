@@ -95,6 +95,7 @@ export class HubRoom extends Room<HubState> {
       const player = this.state.players.get(client.sessionId)
       const totalPlayers = this.state.totalPlayers
 
+      // Send comprehensive test response
       client.send("test_response", {
         message: "Hub received your message!",
         timestamp: Date.now(),
@@ -103,6 +104,8 @@ export class HubRoom extends Room<HubState> {
         totalPlayers: totalPlayers,
         playerFound: !!player,
         playerName: player?.username || "Unknown",
+        roomId: this.roomId,
+        connectedClients: this.clients.length,
       })
 
       // Also send current hub state
@@ -112,7 +115,13 @@ export class HubRoom extends Room<HubState> {
         timestamp: Date.now(),
       })
 
-      console.log(`📊 Hub: Sent test response with ${totalPlayers} total players`)
+      // Broadcast player count update to ensure all clients are in sync
+      this.broadcast("player_count_update", {
+        totalPlayers: totalPlayers,
+        timestamp: Date.now(),
+      })
+
+      console.log(`📊 Hub: Sent test response with ${totalPlayers} total players to ${client.sessionId}`)
     })
 
     // Handle ping/heartbeat messages

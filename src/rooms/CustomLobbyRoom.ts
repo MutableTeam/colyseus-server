@@ -153,8 +153,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         if (p.ready) readyCount++
       })
 
+      // Send comprehensive test response
       client.send("test_response", {
-        message: "Test message received successfully",
+        message: "Lobby test message received successfully",
         timestamp: Date.now(),
         clientId: client.sessionId,
         roomId: this.roomId,
@@ -166,12 +167,15 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         gameSessionActive: !!this.gameSession,
         gameSessionType: this.gameSession?.gameType || null,
         gameSessionPlayers: this.gameSession?.players.size || 0,
+        connectedClients: this.clients.length,
       })
 
       // Also send current lobby stats
       this.broadcastLobbyStats()
 
-      console.log(`📊 Lobby: Sent test response with ${playerCount} total, ${readyCount} ready players`)
+      console.log(
+        `📊 Lobby: Sent test response with ${playerCount} total, ${readyCount} ready players to ${client.sessionId}`,
+      )
     })
 
     // Handle ping/heartbeat messages
