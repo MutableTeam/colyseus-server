@@ -101,20 +101,34 @@ export class BattleState extends Schema {
   createProjectile(
     id: string,
     ownerId: string,
-    position: Vector3D,
-    direction: Vector3D,
+    position: Vector3D | { x: number; y: number; z: number },
+    direction: Vector3D | { x: number; y: number; z: number },
     speed = 50,
     damage = 25,
   ): Projectile {
     const projectile = new Projectile()
     projectile.id = id
     projectile.ownerId = ownerId
-    projectile.position.x = position.x
-    projectile.position.y = position.y
-    projectile.position.z = position.z
-    projectile.direction.x = direction.x
-    projectile.direction.y = direction.y
-    projectile.direction.z = direction.z
+
+    // Handle both Vector3D and plain objects
+    if (position instanceof Vector3D) {
+      projectile.position.x = position.x
+      projectile.position.y = position.y
+      projectile.position.z = position.z
+    } else {
+      projectile.position.x = position.x
+      projectile.position.y = position.y
+      projectile.position.z = position.z
+    }
+
+    if (direction instanceof Vector3D) {
+      projectile.direction.x = direction.x
+      projectile.direction.y = direction.y
+      projectile.direction.z = direction.z
+    } else {
+      projectile.setDirection(direction.x, direction.y, direction.z)
+    }
+
     projectile.speed = speed
     projectile.damage = damage
     projectile.isActive = true
@@ -153,7 +167,8 @@ export class BattleState extends Schema {
     let topPlayer: Player | null = null
     let topKills = 0
 
-    this.players.forEach((player) => {
+    // Use Array.from to convert MapSchema to array for proper iteration
+    Array.from(this.players.values()).forEach((player: Player) => {
       if (player.kills > topKills) {
         topKills = player.kills
         topPlayer = player
@@ -176,7 +191,8 @@ export class BattleState extends Schema {
       let topPlayer: Player | null = null
       let topKills = 0
 
-      this.players.forEach((player) => {
+      // Use Array.from to convert MapSchema to array for proper iteration
+      Array.from(this.players.values()).forEach((player: Player) => {
         if (player.kills > topKills) {
           topKills = player.kills
           topPlayer = player
@@ -241,5 +257,37 @@ export class BattleState extends Schema {
       return true
     }
     return false
+  }
+
+  // Update all projectiles
+  updateProjectiles(deltaTime: number) {
+    this.projectiles.forEach((projectile) => {
+      projectile.update(deltaTime)
+    })
+  }
+
+  // Get all active projectiles
+  getActiveProjectiles(): Projectile[] {
+    const activeProjectiles: Projectile[] = []
+    this.projectiles.forEach((projectile) => {
+      if (projectile.isActive) {
+        activeProjectiles.push(projectile)
+      }
+    })
+    return activeProjectiles
+  }
+
+  // Clean up inactive projectiles
+  cleanupProjectiles() {
+    const toRemove: string[] = []
+    this.projectiles.forEach((projectile, id) => {
+      if (!projectile.isActive) {
+        toRemove.push(id)
+      }
+    })
+
+    toRemove.forEach((id) => {
+      this.removeProjectile(id)
+    })
   }
 }

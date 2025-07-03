@@ -1,14 +1,16 @@
-import { Room, type Client, matchMaker } from "@colyseus/core"
+import { Room, type Client } from "@colyseus/core"
 import { HubState } from "../schemas/HubState"
 
 export class HubRoom extends Room<HubState> {
   maxClients = 100
-  private lobbyUpdateInterval: any
+  private roomScanInterval: any
+  private lastRoomScan = 0
+  private scanCooldown = 5000 // 5 seconds between scans
 
   onCreate(options: any) {
     console.log("🏠 HubRoom created!", options)
 
-    // Set metadata
+    // Set metadata for room discovery
     this.setMetadata({
       name: "Main Hub",
       gameType: "hub",
@@ -16,164 +18,38 @@ export class HubRoom extends Room<HubState> {
       createdAt: Date.now(),
     })
 
-    // Initialize the room state
+    // Initialize hub state
     this.setState(new HubState())
 
-    // Handle request for available lobbies
-    this.onMessage("get_lobbies", async (client: Client, message: any) => {
-      console.log(`🔍 Player ${client.sessionId} requesting lobbies:`, message)
+    // Set up message handlers
+    this.setupMessageHandlers()
 
-      const { gameType } = message
+    // Start periodic room scanning
+    this.startRoomScanning()
 
-      try {
-        let lobbies: any[] = []
+    console.log(`🏠 HubRoom ${this.roomId} ready for connections!`)
+  }
 
-        if (gameType) {
-          // Query for specific game type
-          console.log(`🔍 Hub: Querying for ${gameType} rooms using matchMaker.query()`)
-          const rooms = await matchMaker.query({ name: gameType })
-          lobbies = this.formatRooms(rooms)
-        } else {
-          // Query for all supported room types
-          const roomTypes = ["lobby", "battle", "race", "platformer"]
-          const allRoomQueries = roomTypes.map(async (roomType) => {
-            try {
-              const rooms = await matchMaker.query({ name: roomType })
-              return this.formatRooms(rooms)
-            } catch (error) {
-              console.log(`🔍 Hub: No ${roomType} rooms found`)
-              return []
-            }
-          })
-
-          const roomResults = await Promise.all(allRoomQueries)
-          lobbies = roomResults.flat()
-        }
-
-        console.log(`🔍 Hub: Found ${lobbies.length} available lobbies`)
-
-        client.send("lobbies_update", {
-          lobbies: lobbies,
-          gameType: gameType || "all",
-          timestamp: Date.now(),
-        })
-      } catch (error: any) {
-        console.error(`❌ Hub: Error querying lobbies:`, error)
-        client.send("lobbies_update", {
-          lobbies: [],
-          gameType: gameType || "all",
-          error: error.message,
-          timestamp: Date.now(),
-        })
-      }
+  private setupMessageHandlers() {
+    // Handle room list requests
+    this.onMessage("get_rooms", (client: Client) => {
+      this.sendRoomList(client)
     })
 
-    // Handle navigation to specific lobby
-    this.onMessage("join_lobby", (client: Client, message: any) => {
-      const { lobbyId, gameType } = message
-      console.log(`🎯 Player ${client.sessionId} wants to join lobby ${lobbyId} (${gameType})`)
-
-      client.send("navigate_to_lobby", {
-        lobbyId,
-        gameType,
-        action: "join_lobby",
-        timestamp: Date.now(),
-      })
+    // Handle lobby list requests
+    this.onMessage("get_lobbies", (client: Client) => {
+      this.sendLobbyList(client)
     })
 
-    // Handle creating new lobby
-    this.onMessage("create_lobby", (client: Client, message: any) => {
-      const { gameType, lobbyName, maxPlayers } = message
-      console.log(`🎮 Player ${client.sessionId} wants to create ${gameType} lobby: ${lobbyName}`)
-
-      client.send("navigate_to_lobby", {
-        gameType,
-        lobbyName,
-        maxPlayers,
-        action: "create_lobby",
-        timestamp: Date.now(),
-      })
+    // Handle refresh requests
+    this.onMessage("refresh_rooms", (client: Client) => {
+      this.scanAvailableRooms()
+      this.sendRoomList(client)
     })
 
-    // Handle player status updates
-    this.onMessage("update_status", (client: Client, message: any) => {
-      const player = this.state.players.get(client.sessionId)
-      if (player) {
-        player.status = message.status
-        player.updateActivity()
-        this.state.updateStats()
-      }
-    })
-
-    // Handle room navigation requests
-    this.onMessage("join_room", (client: Client, message: any) => {
-      const { roomType, options } = message
-      console.log(`🚪 Player ${client.sessionId} requesting to join ${roomType}`)
-
-      client.send("room_join_response", {
-        roomType,
-        success: true,
-        options,
-      })
-    })
-
-    // Handle getting server stats
-    this.onMessage("get_server_stats", (client: Client) => {
-      client.send("server_stats", {
-        totalPlayers: this.state.totalPlayers,
-        onlinePlayers: this.state.onlinePlayers,
-        roomCounts: this.state.roomCounts,
-        serverStatus: this.state.serverStatus,
-        announcements: this.state.announcements,
-      })
-    })
-
-    // Handle test messages
-    this.onMessage("test", (client: Client, message: any) => {
-      console.log(`🧪 HubRoom: Test message from ${client.sessionId}:`, message)
-
-      client.send("test_response", {
-        message: "Hub test successful",
-        totalPlayers: this.state.totalPlayers,
-        onlinePlayers: this.state.onlinePlayers,
-        timestamp: Date.now(),
-      })
-    })
-
-    // Handle test message with enhanced response
-    this.onMessage("test_message", (client: Client, message: any) => {
-      console.log(`🧪 Hub: Test message from ${client.sessionId}:`, message)
-
-      const player = this.state.players.get(client.sessionId)
-      const totalPlayers = this.state.totalPlayers
-
-      // Send comprehensive test response
-      client.send("test_response", {
-        message: "Hub received your message!",
-        timestamp: Date.now(),
-        clientId: client.sessionId,
-        hubStatus: this.state.serverStatus,
-        totalPlayers: totalPlayers,
-        playerFound: !!player,
-        playerName: player?.username || "Unknown",
-        roomId: this.roomId,
-        connectedClients: this.clients.length,
-      })
-
-      // Also send current hub state
-      client.send("hub_state_update", {
-        totalPlayers: totalPlayers,
-        serverStatus: this.state.serverStatus,
-        timestamp: Date.now(),
-      })
-
-      // Broadcast player count update to ensure all clients are in sync
-      this.broadcast("player_count_update", {
-        totalPlayers: totalPlayers,
-        timestamp: Date.now(),
-      })
-
-      console.log(`📊 Hub: Sent test response with ${totalPlayers} total players to ${client.sessionId}`)
+    this.onMessage("refresh_lobbies", (client: Client) => {
+      this.scanAvailableLobbies()
+      this.sendLobbyList(client)
     })
 
     // Handle ping/heartbeat messages
@@ -181,188 +57,284 @@ export class HubRoom extends Room<HubState> {
       client.send("pong", { timestamp: Date.now() })
     })
 
-    // Set up periodic lobby discovery
-    this.lobbyUpdateInterval = this.setSimulationInterval(() => {
-      this.discoverAvailableLobbies()
-    }, 10000) // Update every 10 seconds
+    // Handle test message for debugging
+    this.onMessage("test_message", (client: Client, message: any) => {
+      console.log(`🧪 HubRoom: Test message from ${client.sessionId}:`, message)
 
-    // Periodic stats broadcast
-    this.setSimulationInterval(() => {
-      this.broadcast("hub_stats_update", {
-        totalPlayers: this.state.totalPlayers,
-        onlinePlayers: this.state.onlinePlayers,
+      client.send("test_response", {
+        message: "Hub room test response",
         timestamp: Date.now(),
+        clientId: client.sessionId,
+        roomId: this.roomId,
+        totalRooms: this.state.totalRooms,
+        totalLobbies: this.state.totalLobbies,
+        totalPlayers: this.state.totalPlayers,
+        connectedClients: this.clients.length,
       })
-    }, 5000) // Every 5 seconds
+    })
 
-    // Initial lobby discovery
-    this.discoverAvailableLobbies()
+    // Handle create room requests
+    this.onMessage("create_room", async (client: Client, message: any) => {
+      try {
+        const { gameType, roomName, maxPlayers, isPublic } = message
 
-    console.log("🌟 Hub room fully initialized and ready for players!")
-  }
+        console.log(`🎮 HubRoom: Creating ${gameType} room for ${client.sessionId}`)
 
-  private formatRooms(rooms: any[]): any[] {
-    return rooms
-      .filter((room) => !room.locked && room.clients < room.maxClients)
-      .map((room) => ({
-        id: room.roomId,
-        name: room.metadata?.name || `${room.name}_${room.roomId.substring(0, 8)}`,
-        type: room.name,
-        currentPlayers: room.clients || 0,
-        maxPlayers: room.maxClients || 50,
-        createdAt: room.createdAt || Date.now(),
-        locked: room.locked || false,
-        private: room.private || false,
-      }))
-  }
+        // Create room through matchmaker
+        const room = await this.presence.create(gameType, {
+          roomName: roomName || `${gameType}_${Date.now()}`,
+          maxPlayers: maxPlayers || 8,
+          isPublic: isPublic !== false,
+          createdBy: client.sessionId,
+          fromHub: true,
+        })
 
-  async discoverAvailableLobbies() {
-    try {
-      console.log("🔍 Hub: Discovering lobbies using matchMaker.query()...")
+        client.send("room_created", {
+          roomId: room.roomId,
+          gameType: gameType,
+          message: `${gameType} room created successfully!`,
+          timestamp: Date.now(),
+        })
 
-      const roomTypes = ["lobby", "battle", "race", "platformer"]
-      const allRoomQueries = roomTypes.map(async (roomType) => {
-        try {
-          const rooms = await matchMaker.query({ name: roomType })
-          return this.formatRooms(rooms)
-        } catch (error) {
-          console.log(`🔍 Hub: No ${roomType} rooms found during discovery`)
-          return []
-        }
-      })
-
-      const roomResults = await Promise.all(allRoomQueries)
-      const activeRooms = roomResults.flat()
-
-      // Update the hub state with discovered lobbies
-      this.state.updateAvailableLobbies(activeRooms)
-
-      console.log(`🔄 Hub: Updated available lobbies (${activeRooms.length} found using matchMaker.query)`)
-
-      // Broadcast the updated lobbies to all connected clients
-      if (activeRooms.length > 0) {
-        this.broadcast("lobbies_discovered", {
-          lobbies: activeRooms,
+        // Refresh room list after creation
+        setTimeout(() => {
+          this.scanAvailableRooms()
+        }, 1000)
+      } catch (error: any) {
+        console.error(`❌ HubRoom: Failed to create room:`, error)
+        client.send("room_creation_failed", {
+          error: error.message || "Failed to create room",
           timestamp: Date.now(),
         })
       }
-    } catch (error) {
-      console.error("❌ Hub: Error discovering lobbies with matchMaker.query:", error)
+    })
+
+    // Handle join room requests
+    this.onMessage("join_room", async (client: Client, message: any) => {
+      try {
+        const { roomId, username } = message
+
+        console.log(`🚪 HubRoom: ${client.sessionId} joining room ${roomId}`)
+
+        client.send("joining_room", {
+          roomId: roomId,
+          message: `Joining room ${roomId}...`,
+          timestamp: Date.now(),
+        })
+      } catch (error: any) {
+        console.error(`❌ HubRoom: Failed to join room:`, error)
+        client.send("join_room_failed", {
+          error: error.message || "Failed to join room",
+          timestamp: Date.now(),
+        })
+      }
+    })
+  }
+
+  private startRoomScanning() {
+    // Scan immediately
+    this.scanAvailableRooms()
+    this.scanAvailableLobbies()
+
+    // Set up periodic scanning
+    this.roomScanInterval = setInterval(() => {
+      const now = Date.now()
+      if (now - this.lastRoomScan >= this.scanCooldown) {
+        this.scanAvailableRooms()
+        this.scanAvailableLobbies()
+        this.lastRoomScan = now
+      }
+    }, this.scanCooldown)
+  }
+
+  private async scanAvailableRooms() {
+    try {
+      console.log("🔍 HubRoom: Scanning for available rooms...")
+
+      // Get all available rooms
+      const rooms = await this.presence.find({})
+
+      // Clear existing rooms
+      this.state.availableRooms.clear()
+
+      // Filter and add rooms
+      rooms.forEach((room: any) => {
+        // Skip hub rooms and lobbies
+        if (room.name === "hub" || room.name === "lobby") return
+
+        // Add room to state
+        this.state.addRoom(room.roomId, {
+          name: room.metadata?.name || `Room_${room.roomId.substring(0, 8)}`,
+          gameType: room.name,
+          currentPlayers: room.clients,
+          maxPlayers: room.maxClients,
+          isPublic: room.metadata?.isPublic !== false,
+          gameStarted: room.metadata?.gameStarted || false,
+          createdAt: room.metadata?.createdAt || Date.now(),
+        })
+      })
+
+      console.log(`🔍 HubRoom: Found ${this.state.totalRooms} available rooms`)
+
+      // Broadcast updated room list to all clients
+      this.broadcast("rooms_updated", {
+        totalRooms: this.state.totalRooms,
+        timestamp: Date.now(),
+      })
+    } catch (error: any) {
+      console.error("❌ HubRoom: Error scanning rooms:", error)
     }
   }
 
+  private async scanAvailableLobbies() {
+    try {
+      console.log("🔍 HubRoom: Scanning for available lobbies...")
+
+      // Get all lobby rooms
+      const lobbies = await this.presence.find({ name: "lobby" })
+
+      // Clear existing lobbies
+      this.state.availableLobbies.clear()
+
+      // Add lobbies to state
+      lobbies.forEach((lobby: any) => {
+        this.state.addLobby(lobby.roomId, {
+          name: lobby.metadata?.name || `Lobby_${lobby.roomId.substring(0, 8)}`,
+          currentPlayers: lobby.clients,
+          maxPlayers: lobby.maxClients,
+          isPublic: lobby.metadata?.isPublic !== false,
+          createdAt: lobby.metadata?.createdAt || Date.now(),
+        })
+      })
+
+      console.log(`🔍 HubRoom: Found ${this.state.totalLobbies} available lobbies`)
+
+      // Broadcast updated lobby list to all clients
+      this.broadcast("lobbies_updated", {
+        totalLobbies: this.state.totalLobbies,
+        timestamp: Date.now(),
+      })
+    } catch (error: any) {
+      console.error("❌ HubRoom: Error scanning lobbies:", error)
+    }
+  }
+
+  private sendRoomList(client: Client) {
+    const rooms: any[] = []
+    this.state.availableRooms.forEach((room, id) => {
+      rooms.push({
+        roomId: id,
+        name: room.name,
+        gameType: room.gameType,
+        currentPlayers: room.currentPlayers,
+        maxPlayers: room.maxPlayers,
+        isPublic: room.isPublic,
+        gameStarted: room.gameStarted,
+        createdAt: room.createdAt,
+      })
+    })
+
+    client.send("room_list", {
+      rooms: rooms,
+      totalRooms: this.state.totalRooms,
+      timestamp: Date.now(),
+    })
+  }
+
+  private sendLobbyList(client: Client) {
+    const lobbies: any[] = []
+    this.state.availableLobbies.forEach((lobby, id) => {
+      lobbies.push({
+        roomId: id,
+        name: lobby.name,
+        currentPlayers: lobby.currentPlayers,
+        maxPlayers: lobby.maxPlayers,
+        isPublic: lobby.isPublic,
+        createdAt: lobby.createdAt,
+      })
+    })
+
+    client.send("lobby_list", {
+      lobbies: lobbies,
+      totalLobbies: this.state.totalLobbies,
+      timestamp: Date.now(),
+    })
+  }
+
   async onAuth(client: Client, options: any) {
-    console.log(`🔐 HubRoom: Authentication request from ${client.sessionId}`)
-    console.log(`🔐 HubRoom: Current clients: ${this.clients.length}/${this.maxClients}`)
-    console.log(`🔐 HubRoom: Options received:`, options)
+    console.log(`🔐 HubRoom: Authentication request from ${client.sessionId}`, options)
 
     try {
-      // Validate options - be very permissive for public hub
-      if (!options) {
-        options = {}
+      if (!options || typeof options !== "object") {
+        throw new Error("Invalid authentication options")
       }
 
-      // Very permissive authentication for hub
       let username = options.username
       if (!username || typeof username !== "string" || username.trim() === "") {
         username = `Player_${client.sessionId.substring(0, 6)}`
-        console.log(`⚠️ HubRoom: No valid username provided, using default: ${username}`)
       }
 
-      // Sanitize username
       username = username.trim().substring(0, 20)
 
       console.log(`✅ HubRoom: Authentication successful for ${client.sessionId} (${username})`)
-      console.log(`📊 HubRoom: Will have ${this.clients.length + 1} clients after join`)
-
       return {
         username: username,
         authenticated: true,
         joinTime: Date.now(),
       }
-    } catch (error) {
-      console.error(
-        `❌ HubRoom: Authentication failed for ${client.sessionId}:`,
-        error instanceof Error ? error.message : String(error),
-      )
+    } catch (error: any) {
+      console.error(`❌ HubRoom: Authentication failed for ${client.sessionId}:`, error.message)
       throw error
     }
   }
 
   onJoin(client: Client, options: any) {
-    console.log(`${client.sessionId} joined HubRoom with options:`, options)
+    console.log(`🚪 HubRoom: Player ${client.sessionId} (${options.username}) joined the hub`)
 
-    // Add player to state
-    const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
-    this.state.addPlayer(client.sessionId, username, client.sessionId)
+    try {
+      const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
 
-    // Welcome the new player
-    client.send("hub_welcome", {
-      message: "Welcome to the Hub!",
-      playerCount: this.clients.length,
-      sessionId: client.sessionId,
-    })
+      // Send welcome message
+      client.send("hub_joined", {
+        message: `Welcome to the hub, ${username}!`,
+        playerId: client.sessionId,
+        playerName: username,
+        timestamp: Date.now(),
+      })
 
-    // Send current server stats
-    client.send("server_stats", {
-      totalPlayers: this.state.totalPlayers,
-      onlinePlayers: this.state.onlinePlayers,
-      roomCounts: this.state.roomCounts,
-      serverStatus: this.state.serverStatus,
-      announcements: this.state.announcements,
-    })
+      // Send current room and lobby lists
+      this.sendRoomList(client)
+      this.sendLobbyList(client)
 
-    console.log(`📊 HubRoom: Client count before adding to state: ${this.clients.length}`)
+      // Send hub stats
+      client.send("hub_stats", {
+        totalPlayers: this.state.totalPlayers,
+        totalRooms: this.state.totalRooms,
+        totalLobbies: this.state.totalLobbies,
+        connectedToHub: this.clients.length,
+        timestamp: Date.now(),
+      })
 
-    console.log(`📊 HubRoom: Player count after join: ${this.state.totalPlayers}`)
-    console.log(`📊 HubRoom: WebSocket clients: ${this.clients.length}`)
-
-    // CRITICAL: Force state change notification
-    this.state.lastUpdated = Date.now()
-
-    console.log(`✅ HubRoom: Successfully added player ${username} (${client.sessionId})`)
-    console.log(`📊 HubRoom: Hub now has ${this.state.totalPlayers} players`)
+      console.log(`📊 HubRoom: Now has ${this.clients.length} connected clients`)
+    } catch (error: any) {
+      console.error(`❌ HubRoom: Error in onJoin for ${client.sessionId}:`, error)
+      client.send("error", { message: "Failed to join hub" })
+    }
   }
 
   onLeave(client: Client, consented: boolean) {
-    console.log(`${client.sessionId} left HubRoom (consented: ${consented})`)
-
-    // Remove player from state
-    this.state.removePlayer(client.sessionId)
-
-    console.log(`📊 HubRoom: Client count before removal: ${this.clients.length}`)
-
-    console.log(`📊 HubRoom: Player count after leave: ${this.state.totalPlayers}`)
-
-    // CRITICAL: Force state change notification
-    this.state.lastUpdated = Date.now()
-
-    // Broadcast player count update to remaining clients
-    this.broadcast("player_count_update", {
-      totalPlayers: this.state.totalPlayers,
-      timestamp: Date.now(),
-    })
-
-    console.log(`📊 HubRoom: Hub now has ${this.state.totalPlayers} players`)
+    console.log(`👋 HubRoom: Player ${client.sessionId} left the hub (consented: ${consented})`)
+    console.log(`📊 HubRoom: Now has ${this.clients.length} connected clients`)
   }
 
   onDispose() {
-    console.log("🏠 HubRoom: Room disposing...")
-    if (this.lobbyUpdateInterval) {
-      clearInterval(this.lobbyUpdateInterval)
-    }
     console.log("🏠 HubRoom: Room disposed")
+    if (this.roomScanInterval) {
+      clearInterval(this.roomScanInterval)
+    }
   }
 
   onError(client: Client, error: any) {
     console.error(`❌ HubRoom: Client ${client.sessionId} error:`, error)
-    console.error(`❌ HubRoom: Error details:`, {
-      message: error.message,
-      code: error.code,
-      stack: error.stack,
-    })
   }
-
-  // Disable auto-dispose to keep hub persistent
-  autoDispose = false
 }

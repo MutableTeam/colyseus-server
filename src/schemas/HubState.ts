@@ -1,145 +1,123 @@
 import { Schema, MapSchema, type } from "@colyseus/schema"
-import { LobbyPlayer } from "./LobbyPlayer"
-
-export class DiscoveredLobby extends Schema {
-  @type("string") id = ""
-  @type("string") name = ""
-  @type("string") type = ""
-  @type("number") currentPlayers = 0
-  @type("number") maxPlayers = 0
-  @type("number") createdAt = 0
-  @type("boolean") locked = false
-  @type("boolean") private = false
-}
+import { GameListing } from "./GameListing"
 
 export class HubState extends Schema {
-  @type({ map: LobbyPlayer }) players = new MapSchema<LobbyPlayer>()
-  @type({ map: DiscoveredLobby }) discoveredLobbies = new MapSchema<DiscoveredLobby>()
+  @type({ map: GameListing }) availableRooms = new MapSchema<GameListing>()
+  @type({ map: GameListing }) availableLobbies = new MapSchema<GameListing>()
   @type("number") totalPlayers = 0
-  @type("number") onlinePlayers = 0
-  @type("string") serverStatus = "online"
+  @type("number") totalRooms = 0
+  @type("number") totalLobbies = 0
   @type("number") lastUpdated = 0
-  @type({ map: "string" }) announcements = new MapSchema<string>()
-  @type({ map: "number" }) roomCounts = new MapSchema<number>()
 
   constructor() {
     super()
     this.lastUpdated = Date.now()
-    this.serverStatus = "online"
   }
 
-  addPlayer(id: string, name: string, sessionId?: string) {
-    const player = new LobbyPlayer()
-    player.id = id
-    player.name = name
-    player.username = name // Set username same as name
-    player.sessionId = sessionId || id
-    player.status = "online"
-    this.players.set(id, player)
-    this.updateStats()
-    return player
+  addRoom(roomId: string, roomData: any) {
+    const listing = new GameListing()
+    listing.roomId = roomId
+    listing.name = roomData.name || `Room_${roomId.substring(0, 8)}`
+    listing.gameType = roomData.gameType || "unknown"
+    listing.currentPlayers = roomData.currentPlayers || 0
+    listing.maxPlayers = roomData.maxPlayers || 8
+    listing.isPublic = roomData.isPublic !== false
+    listing.gameStarted = roomData.gameStarted || false
+    listing.createdAt = roomData.createdAt || Date.now()
+
+    this.availableRooms.set(roomId, listing)
+    this.updateCounts()
   }
 
-  removePlayer(id: string) {
-    if (this.players.has(id)) {
-      this.players.delete(id)
-      this.updateStats()
-      return true
+  addLobby(lobbyId: string, lobbyData: any) {
+    const listing = new GameListing()
+    listing.roomId = lobbyId
+    listing.name = lobbyData.name || `Lobby_${lobbyId.substring(0, 8)}`
+    listing.gameType = "lobby"
+    listing.currentPlayers = lobbyData.currentPlayers || 0
+    listing.maxPlayers = lobbyData.maxPlayers || 8
+    listing.isPublic = lobbyData.isPublic !== false
+    listing.gameStarted = false
+    listing.createdAt = lobbyData.createdAt || Date.now()
+
+    this.availableLobbies.set(lobbyId, listing)
+    this.updateCounts()
+  }
+
+  removeRoom(roomId: string) {
+    if (this.availableRooms.has(roomId)) {
+      this.availableRooms.delete(roomId)
+      this.updateCounts()
     }
-    return false
   }
 
-  updateStats() {
-    this.totalPlayers = this.players.size
-    this.onlinePlayers = 0
+  removeLobby(lobbyId: string) {
+    if (this.availableLobbies.has(lobbyId)) {
+      this.availableLobbies.delete(lobbyId)
+      this.updateCounts()
+    }
+  }
 
-    this.players.forEach((player) => {
-      if (player.status === "online" || player.status === "ready") {
-        this.onlinePlayers++
-      }
+  updateRoom(roomId: string, roomData: any) {
+    const listing = this.availableRooms.get(roomId)
+    if (listing) {
+      listing.currentPlayers = roomData.currentPlayers || listing.currentPlayers
+      listing.gameStarted = roomData.gameStarted || listing.gameStarted
+      this.updateCounts()
+    }
+  }
+
+  updateLobby(lobbyId: string, lobbyData: any) {
+    const listing = this.availableLobbies.get(lobbyId)
+    if (listing) {
+      listing.currentPlayers = lobbyData.currentPlayers || listing.currentPlayers
+      this.updateCounts()
+    }
+  }
+
+  private updateCounts() {
+    this.totalRooms = this.availableRooms.size
+    this.totalLobbies = this.availableLobbies.size
+
+    let playerCount = 0
+    this.availableRooms.forEach((room) => {
+      playerCount += room.currentPlayers
+    })
+    this.availableLobbies.forEach((lobby) => {
+      playerCount += lobby.currentPlayers
     })
 
+    this.totalPlayers = playerCount
     this.lastUpdated = Date.now()
   }
 
-  addAnnouncement(id: string, message: string) {
-    this.announcements.set(id, message)
-  }
-
-  removeAnnouncement(id: string) {
-    this.announcements.delete(id)
-  }
-
-  updateRoomCount(roomType: string, count: number) {
-    this.roomCounts.set(roomType, count)
-  }
-
-  getOnlinePlayers(): LobbyPlayer[] {
-    const onlinePlayers: LobbyPlayer[] = []
-    this.players.forEach((player) => {
-      if (player.status === "online" || player.status === "ready") {
-        onlinePlayers.push(player)
-      }
-    })
-    return onlinePlayers
-  }
-
-  // Added missing method for lobby discovery
   updateAvailableLobbies(lobbies: any[]) {
     // Clear existing lobbies
-    this.discoveredLobbies.clear()
+    this.availableLobbies.clear()
 
     // Add new lobbies
-    lobbies.forEach((lobbyData) => {
-      const lobby = new DiscoveredLobby()
-      lobby.id = lobbyData.id
-      lobby.name = lobbyData.name
-      lobby.type = lobbyData.type
-      lobby.currentPlayers = lobbyData.currentPlayers
-      lobby.maxPlayers = lobbyData.maxPlayers
-      lobby.createdAt = lobbyData.createdAt
-      lobby.locked = lobbyData.locked
-      lobby.private = lobbyData.private
-
-      this.discoveredLobbies.set(lobbyData.id, lobby)
+    lobbies.forEach((lobby) => {
+      this.addLobby(lobby.roomId, lobby)
     })
-
-    this.lastUpdated = Date.now()
   }
 
-  getAllAvailableLobbies() {
-    const lobbies: any[] = []
-    this.discoveredLobbies.forEach((lobby) => {
-      lobbies.push({
-        id: lobby.id,
-        name: lobby.name,
-        type: lobby.type,
-        currentPlayers: lobby.currentPlayers,
-        maxPlayers: lobby.maxPlayers,
-        createdAt: lobby.createdAt,
-        locked: lobby.locked,
-        private: lobby.private,
-      })
-    })
-    return lobbies
-  }
-
-  getLobbiesByType(gameType: string) {
-    const lobbies: any[] = []
-    this.discoveredLobbies.forEach((lobby) => {
-      if (lobby.type === gameType) {
-        lobbies.push({
-          id: lobby.id,
-          name: lobby.name,
-          type: lobby.type,
-          currentPlayers: lobby.currentPlayers,
-          maxPlayers: lobby.maxPlayers,
-          createdAt: lobby.createdAt,
-          locked: lobby.locked,
-          private: lobby.private,
-        })
+  getPublicRooms(): GameListing[] {
+    const publicRooms: GameListing[] = []
+    this.availableRooms.forEach((room) => {
+      if (room.isPublic) {
+        publicRooms.push(room)
       }
     })
-    return lobbies
+    return publicRooms
+  }
+
+  getPublicLobbies(): GameListing[] {
+    const publicLobbies: GameListing[] = []
+    this.availableLobbies.forEach((lobby) => {
+      if (lobby.isPublic) {
+        publicLobbies.push(lobby)
+      }
+    })
+    return publicLobbies
   }
 }

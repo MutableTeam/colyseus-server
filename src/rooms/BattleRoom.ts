@@ -8,8 +8,8 @@ export class BattleRoom extends Room<BattleState> {
   maxClients = 16
   private gameStarted = false
   private gameStartTimer: any = null
-  private collisionManager: CollisionManager = new CollisionManager() // Fixed initialization
-  private abilityManager: AbilityManager = new AbilityManager() // Fixed initialization
+  private collisionManager: CollisionManager = new CollisionManager()
+  private abilityManager: AbilityManager = new AbilityManager()
   private gameLoopInterval: any
   private lastUpdate: number = Date.now()
 
@@ -34,10 +34,6 @@ export class BattleRoom extends Room<BattleState> {
     this.state.gameMode = options.gameMode || "deathmatch"
     this.state.mapName = options.mapTheme || "default"
     this.state.gameStarted = false
-
-    // Initialize managers
-    // this.collisionManager = new CollisionManager()
-    // this.abilityManager = new AbilityManager()
 
     // Set up message handlers
     this.setupMessageHandlers()
@@ -69,7 +65,7 @@ export class BattleRoom extends Room<BattleState> {
     // Handle player actions
     this.onMessage("player_action", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId)
-      const abilityType = message.abilityType // Moved this line to the top level
+      const abilityType = message.abilityType
       let success = false
 
       if (player) {
@@ -82,17 +78,17 @@ export class BattleRoom extends Room<BattleState> {
             this.handlePlayerJump(client, message)
             break
           case "ability":
-            success = this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
+            success = this.abilityManager.useAbility(player, abilityType, null, this.state)
             break
         }
       }
 
+      // Broadcast ability use to all players
       if (success) {
-        // Broadcast ability use to all players
         this.broadcast("player_used_ability", {
           playerId: client.sessionId,
           abilityType: abilityType,
-          position: player?.position, // Safely access player.position
+          position: player?.position,
           timestamp: Date.now(),
         })
       } else if (message.type === "ability") {
@@ -128,7 +124,7 @@ export class BattleRoom extends Room<BattleState> {
         gameStarted: this.gameStarted,
         gameMode: this.state.gameMode,
         mapTheme: this.state.mapName,
-        connectedClients: this.clients.length, // Added connectedClients
+        connectedClients: this.clients.length,
       })
 
       // Also broadcast current stats
@@ -289,6 +285,9 @@ export class BattleRoom extends Room<BattleState> {
 
     // Check win condition
     this.state.checkWinCondition()
+
+    // Clean up inactive projectiles
+    this.state.cleanupProjectiles()
   }
 
   private updateProjectiles(deltaTime: number) {
@@ -301,9 +300,7 @@ export class BattleRoom extends Room<BattleState> {
       }
 
       // Update projectile position
-      projectile.position.x += projectile.direction.x * projectile.speed * deltaTime
-      projectile.position.y += projectile.direction.y * projectile.speed * deltaTime
-      projectile.position.z += projectile.direction.z * projectile.speed * deltaTime
+      projectile.update(deltaTime)
 
       // Check for collisions with players
       this.state.players.forEach((player) => {
@@ -341,11 +338,6 @@ export class BattleRoom extends Room<BattleState> {
           }
         }
       })
-
-      // Remove projectiles that are too far or too old
-      if (projectile.distanceTraveled > 100 || Date.now() - projectile.createdAt > 5000) {
-        projectilesToRemove.push(id)
-      }
     })
 
     // Clean up inactive projectiles
@@ -400,13 +392,8 @@ export class BattleRoom extends Room<BattleState> {
     try {
       const username = options.username || `Warrior_${client.sessionId.substring(0, 6)}`
 
-      // Add player to battle state using the method on BattleState
-      const player = this.state.addPlayer(
-        client.sessionId,
-        username,
-        options.characterType || "default",
-        options.fromLobby || false,
-      )
+      // Add player to battle state using the correct method signature
+      const player = this.state.addPlayer(client.sessionId, username)
 
       console.log(`✅ BattleRoom: Player ${username} added to battle state`)
 
@@ -513,11 +500,11 @@ export class BattleRoom extends Room<BattleState> {
     if (!player || !this.gameStarted) return
 
     // Create projectile using the method on BattleState
-    const projectile = this.state.addProjectile(
+    const projectile = this.state.createProjectile(
+      `${client.sessionId}_${Date.now()}`,
       client.sessionId,
-      message.position,
+      message.position || player.position,
       message.direction,
-      message.weaponType || "default",
     )
 
     // Broadcast to all players
@@ -567,8 +554,8 @@ export class BattleRoom extends Room<BattleState> {
           w: player.rotation.w,
         },
         health: player.health,
-        score: player.score, // Access score property
-        isAlive: player.isAlive, // Access isAlive property
+        score: player.score,
+        isAlive: player.isAlive,
       })
     })
     return players
@@ -666,7 +653,6 @@ export class BattleRoom extends Room<BattleState> {
   }
 
   onError(client: Client, error: any) {
-    // Explicitly type error as any
     console.error(`❌ BattleRoom: Client ${client.sessionId} error:`, error)
   }
 }

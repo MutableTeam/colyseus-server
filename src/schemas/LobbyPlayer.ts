@@ -2,19 +2,14 @@ import { Schema, type } from "@colyseus/schema"
 
 export class LobbyPlayer extends Schema {
   @type("string") id = ""
-  @type("string") name = ""
-  @type("string") username = "" // Added missing username property
   @type("string") sessionId = ""
+  @type("string") username = ""
+  @type("string") name = ""
   @type("boolean") ready = false
-  @type("string") selectedGameType = ""
+  @type("boolean") isHost = false
+  @type("string") characterType = "default"
   @type("number") joinedAt = 0
   @type("number") lastActivity = 0
-  @type("string") status = "idle" // idle, ready, in_game, disconnected
-  @type("number") level = 1
-  @type("number") experience = 0
-  @type("string") characterType = "default"
-  @type("string") avatar = ""
-  @type({ map: "string" }) preferences = new Map<string, string>()
 
   constructor() {
     super()
@@ -31,8 +26,13 @@ export class LobbyPlayer extends Schema {
     this.updateActivity()
   }
 
-  selectGameType(gameType: string) {
-    this.selectedGameType = gameType
+  setHost(isHost: boolean) {
+    this.isHost = isHost
+    this.updateActivity()
+  }
+
+  setCharacterType(characterType: string) {
+    this.characterType = characterType
     this.updateActivity()
   }
 

@@ -255,4 +255,44 @@ export class Player extends Schema {
       kdr: this.deaths > 0 ? this.kills / this.deaths : this.kills,
     }
   }
+
+  // Helper method to get forward direction vector based on rotation
+  getForwardVector(): Vector3D {
+    const forward = new Vector3D()
+
+    // Convert quaternion to forward vector
+    // This is a simplified calculation for Y-axis rotation
+    const yaw = Math.atan2(
+      2 * (this.rotation.w * this.rotation.y + this.rotation.x * this.rotation.z),
+      1 - 2 * (this.rotation.y * this.rotation.y + this.rotation.z * this.rotation.z),
+    )
+
+    forward.x = Math.sin(yaw)
+    forward.y = 0 // Assuming movement on horizontal plane
+    forward.z = -Math.cos(yaw)
+
+    return forward
+  }
+
+  // Helper method to get right direction vector
+  getRightVector(): Vector3D {
+    const right = new Vector3D()
+    const forward = this.getForwardVector()
+
+    // Right vector is forward rotated 90 degrees around Y axis
+    right.x = forward.z
+    right.y = 0
+    right.z = -forward.x
+
+    return right
+  }
+
+  // Helper method to move player in a direction
+  moveInDirection(direction: Vector3D, deltaTime: number) {
+    const moveSpeed = this.speed * deltaTime
+    this.position.x += direction.x * moveSpeed
+    this.position.y += direction.y * moveSpeed
+    this.position.z += direction.z * moveSpeed
+    this.updateActivity()
+  }
 }
