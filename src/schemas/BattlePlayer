@@ -1,88 +1,259 @@
-import { type } from "@colyseus/schema"
-import { Player } from "./Player" // Extend the base Player class
+import { type, ArraySchema } from "@colyseus/schema"
+import { Player } from "./Player"
 
 export class BattlePlayer extends Player {
-  // Game state (battle-specific)
+  // Battle-specific properties
   @type("number") health = 100
   @type("number") maxHealth = 100
+  @type("number") armor = 0
+  @type("number") shield = 0
+  @type("number") maxShield = 50
+
+  // Combat stats
   @type("number") kills = 0
   @type("number") deaths = 0
-  @type("number") level = 1
-  @type("number") experience = 0
-  @type("boolean") isRespawning = false
-  @type("number") respawnTime = 3 // seconds
-
-  // Battle room specific properties
   @type("number") score = 0
-  @type("boolean") isAlive = true
-
-  // Combat
+  @type("number") damage = 25
+  @type("number") fireRate = 1 // shots per second
   @type("number") lastShotTime = 0
-  @type({ array: "string" }) abilities = new Array<string>()
-  @type({ map: "number" }) abilityCooldowns = new Map<string, number>()
-  @type("number") lastAbilityUseTime = 0
+  @type("number") shotCooldown = 1000 // milliseconds
+
+  // Status
+  @type("boolean") isAlive = true
+  @type("boolean") isRespawning = false
+  @type("number") respawnTime = 5 // seconds
+  @type("number") deathTime = 0
+  @type("boolean") isInBattle = false
+
+  // Team and match info
+  @type("string") team = ""
+  @type("number") matchesPlayed = 0
+  @type("number") matchesWon = 0
+
+  // Abilities
+  @type(["string"]) abilities = new ArraySchema<string>()
+  @type("string") primaryWeapon = "rifle"
+  @type("string") secondaryWeapon = "pistol"
+  @type("string") currentWeapon = "rifle"
+
+  // Ability cooldowns (stored as key-value pairs in a simple way)
+  private abilityCooldowns: Map<string, number> = new Map()
 
   constructor() {
-    super() // Call the constructor of the base Player class
+    super()
     this.health = this.maxHealth
     this.isAlive = true
+    this.isInBattle = false
+    this.initializeAbilities()
   }
 
-  canShoot(): boolean {
-    const now = Date.now()
-    const cooldown = 500 // 0.5 seconds
-    return now - this.lastShotTime > cooldown
-  }
-
-  canUseAbility(abilityId: string): boolean {
-    return !this.abilityCooldowns.has(abilityId) || (this.abilityCooldowns.get(abilityId) || 0) <= 0
-  }
-
-  setAbilityCooldown(abilityId: string, cooldown = 5000) {
-    this.abilityCooldowns.set(abilityId, Date.now() + cooldown) // Store cooldown end time
-    this.lastAbilityUseTime = Date.now()
-  }
-
-  updateCooldowns() {
-    const now = Date.now()
-    this.abilityCooldowns.forEach((cooldownEnd, abilityId) => {
-      if (now >= cooldownEnd) {
-        this.abilityCooldowns.delete(abilityId)
-      }
-    })
-  }
-
-  takeDamage(damage: number): boolean {
-    this.health = Math.max(0, this.health - damage)
-    if (this.health <= 0 && this.isAlive) {
-      this.isAlive = false
-      this.deaths++
-      this.isRespawning = true
-      return true // Player died
+  private initializeAbilities() {
+    // Set default abilities based on character type
+    switch (this.characterType) {
+      case "warrior":
+        this.abilities.push("charge", "shockwave")
+        break
+      case "mage":
+        this.abilities.push("fireball", "teleport")
+        break
+      case "archer":
+        this.abilities.push("multishot", "rapidFire")
+        break
+      default:
+        this.abilities.push("basicAttack")
+        break
     }
-    return false // Player still alive
+  }
+
+  // Combat methods
+  takeDamage(amount: number): boolean {
+    if (!this.isAlive) return false
+
+    // Apply shield first
+    if (this.shield > 0) {
+      const shieldDamage = Math.min(this.shield, amount)
+      this.shield -= shieldDamage
+      amount -= shieldDamage
+    }
+
+    // Apply remaining damage to health
+    if (amount > 0) {
+      this.health -= amount
+    }
+
+    // Check if player died
+    if (this.health <= 0) {
+      this.die()
+      return true
+    }
+
+    return false
   }
 
   heal(amount: number) {
+    if (!this.isAlive) return
+
     this.health = Math.min(this.maxHealth, this.health + amount)
   }
 
+  restoreShield(amount: number) {
+    this.shield = Math.min(this.maxShield, this.shield + amount)
+  }
+
+  die() {
+    this.isAlive = false
+    this.health = 0
+    this.deaths++
+    this.deathTime = Date.now()
+    this.animationState = "dead"
+
+    // Start respawn timer
+    this.isRespawning = true
+  }
+
   respawn() {
-    this.health = this.maxHealth
     this.isAlive = true
+    this.health = this.maxHealth
+    this.shield = this.maxShield
     this.isRespawning = false
-    this.position.x = 0
-    this.position.y = 0
-    this.position.z = 0
+    this.animationState = "idle"
+
+    // Reset velocity
+    this.velocity.x = 0
+    this.velocity.y = 0
+    this.velocity.z = 0
   }
 
   addKill() {
     this.kills++
-    this.score += 100 // 100 points per kill
-    this.experience += 50 // 50 XP per kill
+    this.score += 100 // Base score for kill
+    this.lastUpdate = Date.now()
+  }
+
+  addDeath() {
+    this.deaths++
+    this.lastUpdate = Date.now()
   }
 
   addScore(points: number) {
     this.score += points
+    this.lastUpdate = Date.now()
+  }
+
+  joinBattle() {
+    this.isInBattle = true
+    this.isAlive = true
+    this.setStatus("in-game")
+  }
+
+  leaveBattle() {
+    this.isInBattle = false
+    this.setStatus("connected")
+  }
+
+  // Shooting methods
+  canShoot(): boolean {
+    if (!this.isAlive) return false
+
+    const now = Date.now()
+    return now - this.lastShotTime >= this.shotCooldown
+  }
+
+  shoot() {
+    if (!this.canShoot()) return false
+
+    this.lastShotTime = Date.now()
+    this.animationState = "shooting"
+    return true
+  }
+
+  // Ability methods
+  canUseAbility(abilityId: string): boolean {
+    if (!this.isAlive) return false
+    if (!this.abilities.includes(abilityId)) return false
+
+    const cooldown = this.abilityCooldowns.get(abilityId) || 0
+    return Date.now() >= cooldown
+  }
+
+  setAbilityCooldown(abilityId: string, cooldownMs = 5000) {
+    this.abilityCooldowns.set(abilityId, Date.now() + cooldownMs)
+  }
+
+  getAbilityCooldown(abilityId: string): number {
+    const cooldown = this.abilityCooldowns.get(abilityId) || 0
+    const remaining = cooldown - Date.now()
+    return Math.max(0, remaining)
+  }
+
+  updateCooldowns() {
+    // Clean up expired cooldowns
+    const now = Date.now()
+    for (const [abilityId, cooldown] of this.abilityCooldowns.entries()) {
+      if (now >= cooldown) {
+        this.abilityCooldowns.delete(abilityId)
+      }
+    }
+  }
+
+  // Weapon methods
+  switchWeapon() {
+    this.currentWeapon = this.currentWeapon === this.primaryWeapon ? this.secondaryWeapon : this.primaryWeapon
+
+    // Update fire rate based on weapon
+    switch (this.currentWeapon) {
+      case "rifle":
+        this.shotCooldown = 200 // 5 shots per second
+        this.damage = 25
+        break
+      case "pistol":
+        this.shotCooldown = 300 // ~3.3 shots per second
+        this.damage = 20
+        break
+      case "shotgun":
+        this.shotCooldown = 800 // 1.25 shots per second
+        this.damage = 50
+        break
+      default:
+        this.shotCooldown = 500
+        this.damage = 25
+        break
+    }
+  }
+
+  // Override update method to include battle-specific updates
+  update(deltaTime: number) {
+    super.update(deltaTime)
+
+    // Update cooldowns
+    this.updateCooldowns()
+
+    // Handle respawn timer
+    if (this.isRespawning && !this.isAlive) {
+      const timeSinceDeath = (Date.now() - this.deathTime) / 1000
+      if (timeSinceDeath >= this.respawnTime) {
+        // Ready to respawn (actual respawn handled by room)
+        this.isRespawning = false
+      }
+    }
+
+    // Regenerate shield over time
+    if (this.isAlive && this.shield < this.maxShield) {
+      this.shield = Math.min(this.maxShield, this.shield + 10 * deltaTime) // 10 shield per second
+    }
+  }
+
+  // Get player stats for leaderboard
+  getStats() {
+    return {
+      name: this.name,
+      kills: this.kills,
+      deaths: this.deaths,
+      score: this.score,
+      isAlive: this.isAlive,
+      kdr: this.deaths > 0 ? this.kills / this.deaths : this.kills,
+      matchesPlayed: this.matchesPlayed,
+      matchesWon: this.matchesWon,
+    }
   }
 }
