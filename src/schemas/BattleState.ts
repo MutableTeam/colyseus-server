@@ -63,14 +63,14 @@ export class BattleState extends Schema {
   addProjectile(playerId: string, position: any, direction: any, weaponType: string) {
     const projectile = new Projectile()
     projectile.id = `${playerId}_${Date.now()}`
-    projectile.playerId = playerId
+    projectile.playerId = playerId // Corrected: Assign to playerId
     projectile.position.x = position.x
     projectile.position.y = position.y
     projectile.position.z = position.z
-    projectile.direction.x = direction.x
-    projectile.direction.y = direction.y
-    projectile.direction.z = direction.z
-    projectile.weaponType = weaponType
+    projectile.direction.x = direction.x // Corrected: Assign to direction.x
+    projectile.direction.y = direction.y // Corrected: Assign to direction.y
+    projectile.direction.z = direction.z // Corrected: Assign to direction.z
+    projectile.weaponType = weaponType // Corrected: Assign to weaponType
     this.projectiles.set(projectile.id, projectile)
     return projectile
   }

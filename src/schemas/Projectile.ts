@@ -7,6 +7,11 @@ export class Projectile extends Schema {
   @type("string") ownerId = ""
   @type("string") type = "default"
 
+  // Added missing properties
+  @type("string") playerId = "" // Owner of the projectile
+  @type(Vector3D) direction = new Vector3D() // Direction of the projectile
+  @type("string") weaponType = "default" // Type of weapon that fired it
+
   // 3D position and movement
   @type(Vector3D) position = new Vector3D()
   @type(Vector3D) velocity = new Vector3D()

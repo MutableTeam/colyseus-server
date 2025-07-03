@@ -92,7 +92,25 @@ export class BattleRoom extends Room<BattleState> {
             this.handlePlayerJump(client, message)
             break
           case "ability":
-            this.handlePlayerAbility(client, abilityType) // Updated to use abilityType
+            const success =
+              player && this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
+
+            if (success) {
+              // Broadcast ability use to all players
+              this.broadcast("player_used_ability", {
+                playerId: client.sessionId,
+                abilityType: abilityType,
+                position: player?.position, // Safely access player.position
+                timestamp: Date.now(),
+              })
+            } else {
+              // Send failure message to player
+              client.send("ability_failed", {
+                abilityType: abilityType,
+                reason: "Cooldown or insufficient resources",
+                timestamp: Date.now(),
+              })
+            }
             break
         }
       }
@@ -288,30 +306,6 @@ export class BattleRoom extends Room<BattleState> {
       },
       { except: client },
     )
-  }
-
-  private handlePlayerAbility(client: Client, abilityType: any) {
-    // Updated parameter type to any
-    const player = this.state.players.get(client.sessionId)
-    // Use the method on BattleState
-    const success = player && this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
-
-    if (success) {
-      // Broadcast ability use to all players
-      this.broadcast("player_used_ability", {
-        playerId: client.sessionId,
-        abilityType: abilityType,
-        position: player.position, // Added position for context
-        timestamp: Date.now(),
-      })
-    } else {
-      // Send failure message to player
-      client.send("ability_failed", {
-        abilityType: abilityType,
-        reason: "Cooldown or insufficient resources",
-        timestamp: Date.now(),
-      })
-    }
   }
 
   private getPlayersArray() {
