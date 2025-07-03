@@ -1,30 +1,47 @@
 import { Schema, type } from "@colyseus/schema"
 import { Vector3D } from "./Vector3D"
-import { Quaternion } from "./Quaternion"
 
 export class Projectile extends Schema {
   @type("string") id = ""
-  @type("string") ownerId = ""
-  @type("string") type = "default"
-
-  // Added missing properties
-  @type("string") playerId = "" // Owner of the projectile
-  @type(Vector3D) direction = new Vector3D() // Direction of the projectile
-  @type("string") weaponType = "default" // Type of weapon that fired it
-
-  // 3D position and movement
+  @type("string") playerId = ""
+  @type("string") weaponType = "default"
   @type(Vector3D) position = new Vector3D()
+  @type(Vector3D) direction = new Vector3D()
   @type(Vector3D) velocity = new Vector3D()
-  @type(Quaternion) rotation = new Quaternion()
+  @type("number") speed = 10
+  @type("number") damage = 25
+  @type("number") lifespan = 5000 // milliseconds
+  @type("number") createdAt = 0
+  @type("boolean") active = true
+  @type("number") radius = 0.1 // For collision detection
 
-  // Projectile properties
-  @type("number") damage = 10
-  @type("number") radius = 0.5
-  @type("number") lifetime = 2 // seconds
-  @type("number") speed = 20
-  @type("number") gravity = 0 // Some projectiles might be affected by gravity
+  constructor() {
+    super()
+    this.createdAt = Date.now()
+  }
 
-  // Visual effects (for client rendering)
-  @type("string") effectType = "default" // For different visual effects
-  @type("number") scale = 1
+  update(deltaTime: number) {
+    if (!this.active) return
+
+    // Update position based on velocity
+    this.position.x += this.velocity.x * deltaTime
+    this.position.y += this.velocity.y * deltaTime
+    this.position.z += this.velocity.z * deltaTime
+
+    // Check if projectile has exceeded its lifespan
+    if (Date.now() - this.createdAt > this.lifespan) {
+      this.active = false
+    }
+  }
+
+  setDirection(x: number, y: number, z: number) {
+    this.direction.x = x
+    this.direction.y = y
+    this.direction.z = z
+
+    // Set velocity based on direction and speed
+    this.velocity.x = this.direction.x * this.speed
+    this.velocity.y = this.direction.y * this.speed
+    this.velocity.z = this.direction.z * this.speed
+  }
 }

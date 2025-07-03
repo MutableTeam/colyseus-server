@@ -1,14 +1,16 @@
 import { Room, type Client } from "@colyseus/core"
 import { BattleState } from "../schemas/BattleState"
-import { AbilityManager } from "../managers/AbilityManager"
-import { CollisionManager } from "../managers/CollisionManager"
+import type { AbilityManager } from "../managers/AbilityManager"
+import type { CollisionManager } from "../managers/CollisionManager"
 
 export class BattleRoom extends Room<BattleState> {
   maxClients = 16
   private gameStarted = false
   private gameStartTimer: any = null
-  private abilityManager: AbilityManager = new AbilityManager()
-  private collisionManager: CollisionManager = new CollisionManager()
+  private abilityManager: AbilityManager
+  private collisionManager: CollisionManager
+  private gameLoopInterval: NodeJS.Timeout | null = null
+  private lastUpdateTime = Date.now()
 
   onCreate(options: any) {
     console.log("⚔️ BattleRoom created with Three.js support!", options)
@@ -23,13 +25,15 @@ export class BattleRoom extends Room<BattleState> {
       createdAt: Date.now(),
       gameStarted: this.gameStarted,
       fromLobby: options.fromLobby || false,
+      maxPlayers: options.maxPlayers || 16,
     })
 
     // Initialize battle state
     this.setState(new BattleState())
     this.state.gameMode = options.gameMode || "deathmatch"
     this.state.mapTheme = options.mapTheme || "default"
-    this.state.gameStarted = false
+    this.state.maxPlayers = options.maxPlayers || 16
+    this.state.roomName = options.roomName || `Battle Room ${Date.now().toString().substring(8)}`
 
     // Handle test message for debugging
     this.onMessage("test_message", (client: Client, message: any) => {
@@ -92,8 +96,7 @@ export class BattleRoom extends Room<BattleState> {
             this.handlePlayerJump(client, message)
             break
           case "ability":
-            const success =
-              player && this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
+            const success = this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
 
             if (success) {
               // Broadcast ability use to all players
@@ -116,7 +119,197 @@ export class BattleRoom extends Room<BattleState> {
       }
     })
 
+    // Set up message handlers
+    this.setupMessageHandlers()
+
+    // Start game loop for real-time updates
+    this.startGameLoop()
+
+    // Broadcast room availability for real-time discovery
+    this.broadcastRoomStats()
+
     console.log(`⚔️ BattleRoom ${this.roomId} ready for Three.js multiplayer combat!`)
+  }
+
+  private setupMessageHandlers() {
+    // Handle player movement
+    this.onMessage("move", (client: Client, message: any) => {
+      const player = this.state.players.get(client.sessionId)
+      if (!player || !player.isAlive) return
+
+      try {
+        // Update player position and movement
+        if (message.position) {
+          player.position.x = message.position.x
+          player.position.y = message.position.y
+          player.position.z = message.position.z
+        }
+
+        if (message.velocity) {
+          player.velocity.x = message.velocity.x
+          player.velocity.y = message.velocity.y
+          player.velocity.z = message.velocity.z
+        }
+
+        if (message.rotation) {
+          player.rotation.x = message.rotation.x
+          player.rotation.y = message.rotation.y
+          player.rotation.z = message.rotation.z
+          player.rotation.w = message.rotation.w
+        }
+
+        player.animationState = message.animationState || "idle"
+
+        // Broadcast movement to other players
+        this.broadcast(
+          "player_moved",
+          {
+            playerId: client.sessionId,
+            position: player.position,
+            velocity: player.velocity,
+            rotation: player.rotation,
+            animationState: player.animationState,
+          },
+          { except: client },
+        )
+      } catch (error: any) {
+        console.error(`❌ BattleRoom: Error handling move from ${client.sessionId}:`, error)
+      }
+    })
+
+    // Handle player shooting
+    this.onMessage("shoot", (client: Client, message: any) => {
+      this.handlePlayerShoot(client, message)
+    })
+
+    // Handle player abilities
+    this.onMessage("ability", (client: Client, message: any) => {
+      this.handlePlayerAbility(client, message)
+    })
+
+    // Handle test messages for debugging
+    this.onMessage("test_message", (client: Client, message: any) => {
+      console.log(`🧪 BattleRoom: Test message from ${client.sessionId}:`, message)
+
+      const player = this.state.players.get(client.sessionId)
+      const stats = this.state.getPlayerStats()
+
+      client.send("test_response", {
+        message: "Battle room test message received successfully",
+        timestamp: Date.now(),
+        clientId: client.sessionId,
+        roomId: this.roomId,
+        playerFound: !!player,
+        playerName: player?.name || "Unknown",
+        playerAlive: player?.isAlive || false,
+        playerScore: player?.score || 0,
+        ...stats,
+        connectedClients: this.clients.length,
+      })
+
+      console.log(`📊 BattleRoom: Sent test response to ${client.sessionId}`)
+    })
+
+    // Handle ping/pong for connection health
+    this.onMessage("ping", (client: Client, message: any) => {
+      client.send("pong", { timestamp: Date.now() })
+    })
+  }
+
+  private handlePlayerShoot(client: Client, message: any) {
+    const player = this.state.players.get(client.sessionId)
+    if (!player || !player.isAlive || !player.canShoot()) {
+      return
+    }
+
+    try {
+      const projectileId = `${client.sessionId}_${Date.now()}`
+      const weaponType = message.weaponType || "default"
+
+      // Create projectile
+      const projectile = this.state.addProjectile(
+        projectileId,
+        client.sessionId,
+        {
+          x: message.position?.x || player.position.x,
+          y: message.position?.y || player.position.y,
+          z: message.position?.z || player.position.z,
+        },
+        {
+          x: message.direction?.x || 0,
+          y: message.direction?.y || 0,
+          z: message.direction?.z || -1,
+        },
+        weaponType,
+      )
+
+      player.lastShotTime = Date.now()
+
+      // Broadcast shot to all clients
+      this.broadcast("player_shot", {
+        playerId: client.sessionId,
+        projectileId,
+        position: projectile.position,
+        direction: projectile.direction,
+        weaponType,
+        timestamp: Date.now(),
+      })
+
+      console.log(`🔫 Player ${client.sessionId} shot projectile ${projectileId}`)
+    } catch (error: any) {
+      console.error(`❌ BattleRoom: Error handling shoot from ${client.sessionId}:`, error)
+    }
+  }
+
+  private handlePlayerAbility(client: Client, message: any) {
+    const player = this.state.players.get(client.sessionId)
+    if (!player || !player.isAlive) {
+      return
+    }
+
+    try {
+      const { abilityId, targetPosition } = message
+
+      if (this.state.usePlayerAbility(client.sessionId, abilityId)) {
+        // Broadcast ability use to all clients
+        this.broadcast("player_ability", {
+          playerId: client.sessionId,
+          abilityId,
+          position: player?.position,
+          targetPosition,
+          timestamp: Date.now(),
+        })
+
+        console.log(`✨ Player ${client.sessionId} used ability ${abilityId}`)
+      }
+    } catch (error: any) {
+      console.error(`❌ BattleRoom: Error handling ability from ${client.sessionId}:`, error)
+    }
+  }
+
+  private startGameLoop() {
+    this.gameLoopInterval = setInterval(() => {
+      const now = Date.now()
+      const deltaTime = (now - this.lastUpdateTime) / 1000 // Convert to seconds
+      this.lastUpdateTime = now
+
+      // Update game state
+      this.state.update(deltaTime)
+
+      // Broadcast periodic stats update for real-time synchronization
+      this.broadcastRoomStats()
+    }, 1000 / 60) // 60 FPS game loop
+  }
+
+  private broadcastRoomStats() {
+    const stats = this.state.getPlayerStats()
+
+    // Broadcast to all clients for real-time updates
+    this.broadcast("battle_room_stats_update", {
+      ...stats,
+      connectedClients: this.clients.length,
+      timestamp: Date.now(),
+    })
   }
 
   async onAuth(client: Client, options: any) {
@@ -268,29 +461,6 @@ export class BattleRoom extends Room<BattleState> {
     })
   }
 
-  private handlePlayerShoot(client: Client, message: any) {
-    const player = this.state.players.get(client.sessionId)
-    if (!player || !this.gameStarted) return
-
-    // Create projectile using the method on BattleState
-    const projectile = this.state.addProjectile(
-      client.sessionId,
-      message.position,
-      message.direction,
-      message.weaponType || "default",
-    )
-
-    // Broadcast to all players
-    this.broadcast("player_shot", {
-      playerId: client.sessionId,
-      projectileId: projectile.id,
-      position: message.position,
-      direction: message.direction,
-      weaponType: message.weaponType || "default",
-      timestamp: Date.now(),
-    })
-  }
-
   private handlePlayerJump(client: Client, message: any) {
     const player = this.state.players.get(client.sessionId)
     if (!player || !this.gameStarted) return
@@ -420,6 +590,10 @@ export class BattleRoom extends Room<BattleState> {
     console.log("⚔️ BattleRoom: Room disposed")
     if (this.gameStartTimer) {
       clearTimeout(this.gameStartTimer)
+    }
+    if (this.gameLoopInterval) {
+      clearInterval(this.gameLoopInterval)
+      this.gameLoopInterval = null
     }
   }
 
