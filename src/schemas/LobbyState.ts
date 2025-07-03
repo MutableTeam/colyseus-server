@@ -1,21 +1,10 @@
 import { Schema, MapSchema, type } from "@colyseus/schema"
+import { Player } from "./Player"
 import { GameListing } from "./GameListing"
 
-export class LobbyPlayer extends Schema {
-  @type("string") sessionId: string
-  @type("string") username: string
-  @type("boolean") isReady = false
-  @type("string") selectedGameType: string | null = null
-  @type("number") joinedAt: number
-}
-
 export class LobbyState extends Schema {
-  @type({ map: LobbyPlayer }) players = new MapSchema<LobbyPlayer>()
+  @type({ map: Player }) players = new MapSchema<Player>()
   @type({ map: GameListing }) availableGames = new MapSchema<GameListing>()
-  @type("number") totalPlayers = 0
-  @type("number") readyPlayers = 0
-  @type("boolean") gameSessionActive = false
-  @type("string") gameSessionType: string | null = null
 
   createGame(id: string, type: string, name: string, maxPlayers: number, creatorId: string) {
     const game = new GameListing()
@@ -74,26 +63,17 @@ export class LobbyState extends Schema {
   }
 
   addPlayer(id: string, name: string) {
-    const player = new LobbyPlayer()
-    player.sessionId = id
-    player.username = name
-    player.joinedAt = Date.now()
+    const player = new Player()
+    player.id = id
+    player.name = name
+    player.ready = false // Initialize ready state to false
     this.players.set(id, player)
-    this.totalPlayers++
-    if (player.isReady) {
-      this.readyPlayers++
-    }
     return player
   }
 
   removePlayer(id: string) {
     if (this.players.has(id)) {
-      const player = this.players.get(id)
-      if (player && player.isReady) {
-        this.readyPlayers--
-      }
       this.players.delete(id)
-      this.totalPlayers--
       return true
     }
     return false

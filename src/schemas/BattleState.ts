@@ -32,7 +32,6 @@ export class BattleState extends Schema {
   @type("number") gameTime = 0
   @type("number") maxGameTime = 300 // 5 minutes
   @type("string") gameMode = "deathmatch" // deathmatch, teamDeathmatch, captureTheFlag, etc.
-  @type("number") maxPlayers = 16
 
   // Environment settings
   @type("string") timeOfDay = "day" // day, night, dusk, etc.
