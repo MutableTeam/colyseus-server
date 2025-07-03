@@ -2,6 +2,8 @@ import { Room, type Client } from "@colyseus/core"
 import { BattleState } from "../schemas/BattleState"
 import { AbilityManager } from "../managers/AbilityManager"
 import { CollisionManager } from "../managers/CollisionManager"
+import type { BattlePlayer } from "../schemas/BattlePlayer" // Import BattlePlayer
+import { Vector3D } from "../schemas/Vector3D" // Import Vector3D
 
 export class BattleRoom extends Room<BattleState> {
   maxClients = 16
@@ -9,6 +11,8 @@ export class BattleRoom extends Room<BattleState> {
   private gameStartTimer: any = null
   private abilityManager: AbilityManager = new AbilityManager()
   private collisionManager: CollisionManager = new CollisionManager()
+  private gameLoopInterval: any // Added gameLoopInterval
+  private lastUpdate: number = Date.now() // Added lastUpdate
 
   onCreate(options: any) {
     console.log("⚔️ BattleRoom created with Three.js support!", options)
@@ -28,42 +32,22 @@ export class BattleRoom extends Room<BattleState> {
     // Initialize battle state
     this.setState(new BattleState())
     this.state.gameMode = options.gameMode || "deathmatch"
-    this.state.mapTheme = options.mapTheme || "default"
+    this.state.mapName = options.mapTheme || "default"
     this.state.gameStarted = false
 
-    // Handle test message for debugging
-    this.onMessage("test_message", (client: Client, message: any) => {
-      console.log(`🧪 BattleRoom: Test message from ${client.sessionId}:`, message)
+    // Set up message handlers
+    this.setupMessageHandlers()
 
-      const player = this.state.players.get(client.sessionId)
-      const playerCount = this.state.players.size
+    // Start game loop
+    this.startGameLoop()
 
-      client.send("test_response", {
-        message: "Battle room test response",
-        timestamp: Date.now(),
-        clientId: client.sessionId,
-        roomId: this.roomId,
-        playerFound: !!player,
-        playerName: player?.name || "Unknown",
-        totalPlayers: playerCount,
-        gameStarted: this.gameStarted,
-        gameMode: this.state.gameMode,
-        mapTheme: this.state.mapTheme,
-        connectedClients: this.clients.length, // Added connectedClients
-      })
+    console.log(`⚔️ BattleRoom ${this.roomId} ready for Three.js multiplayer combat!`)
+  }
 
-      // Also broadcast current stats
-      this.broadcastBattleStats()
-    })
-
-    // Handle ping/heartbeat messages
-    this.onMessage("ping", (client: Client, message: any) => {
-      client.send("pong", { timestamp: Date.now() })
-    })
-
+  private setupMessageHandlers() {
     // Handle player movement (for Three.js)
     this.onMessage("player_move", (client: Client, message: any) => {
-      const player = this.state.players.get(client.sessionId)
+      const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
       if (player && message.position) {
         player.position.x = message.position.x
         player.position.y = message.position.y
@@ -80,8 +64,10 @@ export class BattleRoom extends Room<BattleState> {
 
     // Handle player actions
     this.onMessage("player_action", (client: Client, message: any) => {
-      const player = this.state.players.get(client.sessionId)
-      const abilityType = message.abilityType // Moved this line to the top level
+      const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
+      const abilityType = message.abilityType
+      let success = false
+
       if (player) {
         // Handle different action types
         switch (message.type) {
@@ -92,31 +78,279 @@ export class BattleRoom extends Room<BattleState> {
             this.handlePlayerJump(client, message)
             break
           case "ability":
-            const success =
-              player && this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
-
-            if (success) {
-              // Broadcast ability use to all players
-              this.broadcast("player_used_ability", {
-                playerId: client.sessionId,
-                abilityType: abilityType,
-                position: player?.position, // Safely access player.position
-                timestamp: Date.now(),
-              })
-            } else {
-              // Send failure message to player
-              client.send("ability_failed", {
-                abilityType: abilityType,
-                reason: "Cooldown or insufficient resources",
-                timestamp: Date.now(),
-              })
-            }
+            success = this.abilityManager.useAbility(this, player, abilityType, message.targetPosition || null) // Pass 'this' (Room)
             break
+        }
+      }
+
+      if (success) {
+        // Broadcast ability use to all players
+        this.broadcast("player_used_ability", {
+          playerId: client.sessionId,
+          abilityType: abilityType,
+          position: player?.position,
+          timestamp: Date.now(),
+        })
+      } else if (message.type === "ability") {
+        // Send failure message to player
+        client.send("ability_failed", {
+          abilityType: abilityType,
+          reason: "Cooldown or insufficient resources",
+          timestamp: Date.now(),
+        })
+      }
+    })
+
+    // Handle ping/heartbeat messages
+    this.onMessage("ping", (client: Client, message: any) => {
+      client.send("pong", { timestamp: Date.now() })
+    })
+
+    // Handle test message for debugging
+    this.onMessage("test_message", (client: Client, message: any) => {
+      console.log(`🧪 BattleRoom: Test message from ${client.sessionId}:`, message)
+
+      const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
+      const playerCount = this.state.players.size
+
+      client.send("test_response", {
+        message: "Battle room test response",
+        timestamp: Date.now(),
+        clientId: client.sessionId,
+        roomId: this.roomId,
+        playerFound: !!player,
+        playerName: player?.name || "Unknown",
+        totalPlayers: playerCount,
+        gameStarted: this.gameStarted,
+        gameMode: this.state.gameMode,
+        mapTheme: this.state.mapName,
+        connectedClients: this.clients.length,
+      })
+
+      // Also broadcast current stats
+      this.broadcastBattleStats()
+    })
+
+    // Handle player movement
+    this.onMessage("move", (client: Client, message: any) => {
+      const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
+      if (player && player.isAlive) {
+        const { position, rotation, velocity, animationState } = message
+
+        if (position) {
+          player.position.x = position.x
+          player.position.y = position.y
+          player.position.z = position.z
+        }
+
+        if (rotation) {
+          player.rotation.x = rotation.x
+          player.rotation.y = rotation.y
+          player.rotation.z = rotation.z
+          player.rotation.w = rotation.w
+        }
+
+        if (velocity) {
+          player.velocity.x = velocity.x
+          player.velocity.y = velocity.y
+          player.velocity.z = velocity.z
+        }
+
+        if (animationState) {
+          player.animationState = animationState
         }
       }
     })
 
-    console.log(`⚔️ BattleRoom ${this.roomId} ready for Three.js multiplayer combat!`)
+    // Handle shooting
+    this.onMessage("shoot", (client: Client, message: any) => {
+      const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
+      if (player && player.isAlive && player.canShoot()) {
+        const { direction, position } = message
+
+        // Create projectile
+        const projectileId = `${client.sessionId}_${Date.now()}`
+        const projectilePosition = new Vector3D()
+        projectilePosition.x = position?.x || player.position.x
+        projectilePosition.y = position?.y || player.position.y + 1.5 // Eye level
+        projectilePosition.z = position?.z || player.position.z
+
+        const projectileDirection = new Vector3D()
+        projectileDirection.x = direction.x
+        projectileDirection.y = direction.y
+        projectileDirection.z = direction.z
+
+        this.state.createProjectile(
+          projectileId,
+          client.sessionId,
+          projectilePosition,
+          projectileDirection,
+          50, // speed
+          25, // damage
+        )
+
+        player.lastShotTime = Date.now()
+
+        // Broadcast shot event
+        this.broadcast("player_shot", {
+          playerId: client.sessionId,
+          projectileId,
+          position: projectilePosition,
+          direction: projectileDirection,
+        })
+      }
+    })
+
+    // Handle ability usage
+    this.onMessage("use_ability", (client: Client, message: any) => {
+      const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
+      if (player && player.isAlive) {
+        const { abilityId, targetPosition } = message
+
+        if (player.canUseAbility(abilityId)) {
+          const success = this.abilityManager.useAbility(this, player, abilityId, targetPosition) // Pass 'this' (Room)
+
+          if (success) {
+            player.setAbilityCooldown(abilityId)
+
+            this.broadcast("ability_used", {
+              playerId: client.sessionId,
+              abilityId,
+              targetPosition,
+            })
+          }
+        }
+      }
+    })
+
+    // Handle respawn requests
+    this.onMessage("respawn", (client: Client) => {
+      const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
+      if (player && !player.isAlive && player.isRespawning) {
+        // Start respawn timer
+        // player.isRespawning = true // This should be set when player dies
+
+        setTimeout(() => {
+          if (this.state.respawnPlayer(client.sessionId)) {
+            this.broadcast("player_respawned", {
+              playerId: client.sessionId,
+              position: player.position,
+            })
+          }
+        }, player.respawnTime * 1000)
+      }
+    })
+
+    // Handle test messages
+    this.onMessage("test", (client: Client, message: any) => {
+      console.log(`🧪 BattleRoom: Test message from ${client.sessionId}:`, message)
+
+      const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
+      client.send("test_response", {
+        message: "Battle room test successful",
+        playerId: client.sessionId,
+        playerName: player?.name || "Unknown",
+        isAlive: player?.isAlive || false,
+        health: player?.health || 0,
+        kills: player?.kills || 0,
+        gameActive: this.state.gameActive,
+        gameTime: this.state.gameTime,
+        timestamp: Date.now(),
+      })
+    })
+  }
+
+  private startGameLoop() {
+    // 60 FPS game loop
+    this.gameLoopInterval = setInterval(() => {
+      const now = Date.now()
+      const deltaTime = (now - this.lastUpdate) / 1000 // Convert to seconds
+      this.lastUpdate = now
+
+      this.updateGame(deltaTime)
+    }, 1000 / 60) // 60 FPS
+  }
+
+  private updateGame(deltaTime: number) {
+    // Update game time
+    this.state.updateGameTime(deltaTime)
+
+    // Update projectiles
+    this.updateProjectiles(deltaTime)
+
+    // Update player cooldowns
+    this.state.players.forEach((player) => {
+      player.updateCooldowns()
+    })
+
+    // Check win condition
+    this.state.checkWinCondition()
+
+    // Clean up inactive projectiles
+    this.state.cleanupProjectiles()
+  }
+
+  private updateProjectiles(deltaTime: number) {
+    const projectilesToRemove: string[] = []
+
+    this.state.projectiles.forEach((projectile, id) => {
+      if (!projectile.isActive) {
+        projectilesToRemove.push(id)
+        return
+      }
+
+      // Update projectile position
+      projectile.update(deltaTime)
+
+      // Check for collisions with players
+      this.state.players.forEach((player) => {
+        if (player.sessionId !== projectile.ownerId && player.isAlive) {
+          const distance = this.calculateDistance(projectile.position, player.position)
+
+          if (distance < player.radius) {
+            // Hit detected
+            const died = player.takeDamage(projectile.damage)
+
+            if (died) {
+              // Award kill to shooter
+              const shooter = this.state.players.get(projectile.ownerId) as BattlePlayer // Cast to BattlePlayer
+              if (shooter) {
+                shooter.addKill()
+              }
+
+              this.broadcast("player_killed", {
+                victimId: player.sessionId,
+                killerId: projectile.ownerId,
+                position: player.position,
+              })
+            }
+
+            this.broadcast("player_hit", {
+              playerId: player.sessionId,
+              damage: projectile.damage,
+              health: player.health,
+              position: player.position,
+            })
+
+            // Remove projectile
+            projectile.isActive = false
+            projectilesToRemove.push(id)
+          }
+        }
+      })
+    })
+
+    // Clean up inactive projectiles
+    projectilesToRemove.forEach((id) => {
+      this.state.removeProjectile(id)
+    })
+  }
+
+  private calculateDistance(pos1: Vector3D, pos2: Vector3D): number {
+    const dx = pos1.x - pos2.x
+    const dy = pos1.y - pos2.y
+    const dz = pos1.z - pos2.z
+    return Math.sqrt(dx * dx + dy * dy + dz * dz)
   }
 
   async onAuth(client: Client, options: any) {
@@ -178,7 +412,7 @@ export class BattleRoom extends Room<BattleState> {
         playerName: username,
         playerCount: playerCount,
         gameMode: this.state.gameMode,
-        mapTheme: this.state.mapTheme,
+        mapTheme: this.state.mapName,
         gameStarted: this.gameStarted,
         timestamp: Date.now(),
       })
@@ -188,7 +422,7 @@ export class BattleRoom extends Room<BattleState> {
         players: this.getPlayersArray(),
         gameStarted: this.gameStarted,
         gameMode: this.state.gameMode,
-        mapTheme: this.state.mapTheme,
+        mapTheme: this.state.mapName,
         timestamp: Date.now(),
       })
 
@@ -255,21 +489,21 @@ export class BattleRoom extends Room<BattleState> {
     this.broadcast("game_started", {
       message: "Battle has begun!",
       gameMode: this.state.gameMode,
-      mapTheme: this.state.mapTheme,
+      mapTheme: this.state.mapName,
       playerCount: this.state.players.size,
       timestamp: Date.now(),
     })
 
     // Initialize Three.js scene data for all players
     this.broadcast("initialize_scene", {
-      mapTheme: this.state.mapTheme,
+      mapTheme: this.state.mapName,
       players: this.getPlayersArray(),
       timestamp: Date.now(),
     })
   }
 
   private handlePlayerShoot(client: Client, message: any) {
-    const player = this.state.players.get(client.sessionId)
+    const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
     if (!player || !this.gameStarted) return
 
     // Create projectile using the method on BattleState
@@ -292,7 +526,7 @@ export class BattleRoom extends Room<BattleState> {
   }
 
   private handlePlayerJump(client: Client, message: any) {
-    const player = this.state.players.get(client.sessionId)
+    const player = this.state.players.get(client.sessionId) as BattlePlayer // Cast to BattlePlayer
     if (!player || !this.gameStarted) return
 
     // Broadcast jump to all players
@@ -327,8 +561,8 @@ export class BattleRoom extends Room<BattleState> {
           w: player.rotation.w,
         },
         health: player.health,
-        score: player.score, // Access score property
-        isAlive: player.isAlive, // Access isAlive property
+        score: player.score,
+        isAlive: player.isAlive,
       })
     })
     return players
@@ -341,7 +575,7 @@ export class BattleRoom extends Room<BattleState> {
       totalPlayers: playerCount,
       gameStarted: this.gameStarted,
       gameMode: this.state.gameMode,
-      mapTheme: this.state.mapTheme,
+      mapTheme: this.state.mapName,
       timestamp: Date.now(),
     })
 
@@ -420,6 +654,9 @@ export class BattleRoom extends Room<BattleState> {
     console.log("⚔️ BattleRoom: Room disposed")
     if (this.gameStartTimer) {
       clearTimeout(this.gameStartTimer)
+    }
+    if (this.gameLoopInterval) {
+      clearInterval(this.gameLoopInterval)
     }
   }
 

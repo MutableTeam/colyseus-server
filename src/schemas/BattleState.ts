@@ -1,5 +1,5 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema"
-import { Player } from "./Player"
+import { BattlePlayer } from "./BattlePlayer" // Import BattlePlayer
 import { Projectile } from "./Projectile"
 import { Vector3D } from "./Vector3D"
 
@@ -13,7 +13,7 @@ export class MapObject extends Schema {
 }
 
 export class BattleState extends Schema {
-  @type({ map: Player }) players = new MapSchema<Player>()
+  @type({ map: BattlePlayer }) players = new MapSchema<BattlePlayer>() // Use BattlePlayer
   @type({ map: Projectile }) projectiles = new MapSchema<Projectile>()
   @type([MapObject]) mapObjects = new ArraySchema<MapObject>()
 
@@ -23,6 +23,7 @@ export class BattleState extends Schema {
   @type("number") mapHeight = 50
   @type("string") mapTheme = "default" // For different visual themes
   @type("number") gravity = 9.8 // World gravity
+  @type("string") mapName = "default" // Added mapName for consistency
 
   // Game state
   @type("boolean") gameStarted = false
@@ -32,6 +33,11 @@ export class BattleState extends Schema {
   @type("number") gameTime = 0
   @type("number") maxGameTime = 300 // 5 minutes
   @type("string") gameMode = "deathmatch" // deathmatch, teamDeathmatch, captureTheFlag, etc.
+  @type("boolean") gameActive = true
+  @type("number") killLimit = 25
+  @type("string") winner = ""
+  @type({ array: Vector3D }) spawnPoints = new ArraySchema<Vector3D>()
+  @type("number") lastUpdate = 0
 
   // Environment settings
   @type("string") timeOfDay = "day" // day, night, dusk, etc.
@@ -42,40 +48,214 @@ export class BattleState extends Schema {
     this.mapWidth = mapWidth
     this.mapLength = mapLength
     this.mapHeight = mapHeight
+    this.gameTime = 0
+    this.gameActive = true
+    this.lastUpdate = Date.now()
+    this.initializeSpawnPoints()
   }
 
-  // Added missing methods for player and projectile management
-  addPlayer(sessionId: string, name: string, characterType: string, fromLobby: boolean) {
-    const player = new Player()
-    player.id = sessionId // Use id for sessionId
+  private initializeSpawnPoints() {
+    // Add default spawn points for the battle arena
+    const spawnPositions = [
+      { x: 10, y: 0, z: 10 },
+      { x: -10, y: 0, z: 10 },
+      { x: 10, y: 0, z: -10 },
+      { x: -10, y: 0, z: -10 },
+      { x: 0, y: 0, z: 15 },
+      { x: 0, y: 0, z: -15 },
+      { x: 15, y: 0, z: 0 },
+      { x: -15, y: 0, z: 0 },
+    ]
+
+    spawnPositions.forEach((pos) => {
+      const spawnPoint = new Vector3D()
+      spawnPoint.x = pos.x
+      spawnPoint.y = pos.y
+      spawnPoint.z = pos.z
+      this.spawnPoints.push(spawnPoint)
+    })
+  }
+
+  // Updated to create BattlePlayer
+  addPlayer(sessionId: string, name: string, characterType: string, fromLobby: boolean): BattlePlayer {
+    const player = new BattlePlayer()
+    player.id = sessionId
+    player.sessionId = sessionId
     player.name = name
     player.characterType = characterType
-    player.score = 0 // Initialize score
-    player.isAlive = true // Initialize isAlive
+    player.isAlive = true
+    player.health = player.maxHealth
+
+    // Set spawn position
+    const spawnPoint = this.getRandomSpawnPoint()
+    player.position.x = spawnPoint.x
+    player.position.y = spawnPoint.y
+    player.position.z = spawnPoint.z
+
     this.players.set(sessionId, player)
     return player
   }
 
-  removePlayer(sessionId: string) {
-    return this.players.delete(sessionId)
+  removePlayer(sessionId: string): boolean {
+    if (this.players.has(sessionId)) {
+      this.players.delete(sessionId)
+      return true
+    }
+    return false
   }
 
-  addProjectile(playerId: string, position: any, direction: any, weaponType: string) {
+  createProjectile(
+    id: string,
+    ownerId: string,
+    position: Vector3D | { x: number; y: number; z: number },
+    direction: Vector3D | { x: number; y: number; z: number },
+    speed = 50,
+    damage = 25,
+  ): Projectile {
     const projectile = new Projectile()
-    projectile.id = `${playerId}_${Date.now()}`
-    projectile.playerId = playerId // Corrected: Assign to playerId
-    projectile.position.x = position.x
-    projectile.position.y = position.y
-    projectile.position.z = position.z
-    projectile.direction.x = direction.x // Corrected: Assign to direction.x
-    projectile.direction.y = direction.y // Corrected: Assign to direction.y
-    projectile.direction.z = direction.z // Corrected: Assign to direction.z
-    projectile.weaponType = weaponType // Corrected: Assign to weaponType
-    this.projectiles.set(projectile.id, projectile)
+    projectile.id = id
+    projectile.ownerId = ownerId
+
+    // Handle both Vector3D and plain objects
+    if (position instanceof Vector3D) {
+      projectile.position.x = position.x
+      projectile.position.y = position.y
+      projectile.position.z = position.z
+    } else {
+      projectile.position.x = position.x
+      projectile.position.y = position.y
+      projectile.position.z = position.z
+    }
+
+    if (direction instanceof Vector3D) {
+      projectile.direction.x = direction.x
+      projectile.direction.y = direction.y
+      projectile.direction.z = direction.z
+    } else {
+      projectile.setDirection(direction.x, direction.y, direction.z)
+    }
+
+    projectile.speed = speed
+    projectile.damage = damage
+    projectile.isActive = true
+
+    this.projectiles.set(id, projectile)
     return projectile
   }
 
-  usePlayerAbility(sessionId: string, abilityType: string) {
+  removeProjectile(id: string): boolean {
+    if (this.projectiles.has(id)) {
+      this.projectiles.delete(id)
+      return true
+    }
+    return false
+  }
+
+  getRandomSpawnPoint(): Vector3D {
+    const randomIndex = Math.floor(Math.random() * this.spawnPoints.length)
+    return this.spawnPoints[randomIndex]
+  }
+
+  updateGameTime(deltaTime: number) {
+    if (this.gameActive) {
+      this.gameTime += deltaTime
+      if (this.gameTime >= this.maxGameTime) {
+        this.endGame()
+      }
+    }
+    this.lastUpdate = Date.now()
+  }
+
+  checkWinCondition(): string | null {
+    if (!this.gameActive) return this.winner
+
+    // Check kill limit
+    let topPlayer: BattlePlayer | null = null // Use BattlePlayer
+    let topKills = 0
+
+    // Use Array.from to convert MapSchema to array for proper iteration
+    Array.from(this.players.values()).forEach((player: BattlePlayer) => {
+      if (player.kills > topKills) {
+        topKills = player.kills
+        topPlayer = player
+      }
+    })
+
+    if (topKills >= this.killLimit && topPlayer) {
+      this.winner = topPlayer.name
+      this.endGame()
+      return this.winner
+    }
+
+    return null
+  }
+
+  endGame() {
+    this.gameActive = false
+    if (!this.winner) {
+      // Find player with most kills
+      let topPlayer: BattlePlayer | null = null // Use BattlePlayer
+      let topKills = 0
+
+      // Use Array.from to convert MapSchema to array for proper iteration
+      Array.from(this.players.values()).forEach((player: BattlePlayer) => {
+        if (player.kills > topKills) {
+          topKills = player.kills
+          topPlayer = player
+        }
+      })
+
+      this.winner = topPlayer?.name || "No Winner"
+    }
+  }
+
+  getLeaderboard(): Array<{ name: string; kills: number; deaths: number; score: number }> {
+    const leaderboard: Array<{ name: string; kills: number; deaths: number; score: number }> = []
+
+    this.players.forEach((player) => {
+      leaderboard.push({
+        name: player.name,
+        kills: player.kills,
+        deaths: player.deaths,
+        score: player.score,
+      })
+    })
+
+    // Sort by kills, then by score
+    return leaderboard.sort((a, b) => {
+      if (a.kills !== b.kills) {
+        return b.kills - a.kills
+      }
+      return b.score - a.score
+    })
+  }
+
+  getAlivePlayers(): BattlePlayer[] {
+    // Use BattlePlayer
+    const alivePlayers: BattlePlayer[] = []
+    this.players.forEach((player) => {
+      if (player.isAlive) {
+        alivePlayers.push(player)
+      }
+    })
+    return alivePlayers
+  }
+
+  respawnPlayer(sessionId: string): boolean {
+    const player = this.players.get(sessionId)
+    if (player && !player.isAlive) {
+      const spawnPoint = this.getRandomSpawnPoint()
+      player.position.x = spawnPoint.x
+      player.position.y = spawnPoint.y
+      player.position.z = spawnPoint.z
+      player.respawn()
+      return true
+    }
+    return false
+  }
+
+  // Added missing usePlayerAbility method
+  usePlayerAbility(sessionId: string, abilityType: string): boolean {
     const player = this.players.get(sessionId)
     if (player && player.isAlive) {
       // Implement actual ability logic and cooldowns here
@@ -84,5 +264,37 @@ export class BattleState extends Schema {
       return true
     }
     return false
+  }
+
+  // Update all projectiles
+  updateProjectiles(deltaTime: number) {
+    this.projectiles.forEach((projectile) => {
+      projectile.update(deltaTime)
+    })
+  }
+
+  // Get all active projectiles
+  getActiveProjectiles(): Projectile[] {
+    const activeProjectiles: Projectile[] = []
+    this.projectiles.forEach((projectile) => {
+      if (projectile.isActive) {
+        activeProjectiles.push(projectile)
+      }
+    })
+    return activeProjectiles
+  }
+
+  // Clean up inactive projectiles
+  cleanupProjectiles() {
+    const toRemove: string[] = []
+    this.projectiles.forEach((projectile, id) => {
+      if (!projectile.isActive) {
+        toRemove.push(id)
+      }
+    })
+
+    toRemove.forEach((id) => {
+      this.removeProjectile(id)
+    })
   }
 }

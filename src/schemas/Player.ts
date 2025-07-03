@@ -4,81 +4,36 @@ import { Quaternion } from "./Quaternion"
 
 export class Player extends Schema {
   @type("string") id = ""
-  @type("string") sessionId = "" // Added sessionId for consistency with LobbyPlayer
+  @type("string") sessionId = ""
   @type("string") name = ""
   @type("string") characterType = "default"
   @type("string") modelType = "default" // For different 3D models
 
-  // 3D position and movement
+  // 3D position and movement (common for all player types)
   @type(Vector3D) position = new Vector3D()
   @type(Vector3D) velocity = new Vector3D()
   @type(Vector3D) moveDirection = new Vector3D()
   @type(Quaternion) rotation = new Quaternion() // For 3D rotation
 
-  // Physics properties
+  // Physics properties (common for all player types)
   @type("number") speed = 5
   @type("number") jumpForce = 10
   @type("boolean") isGrounded = false
   @type("number") mass = 1
   @type("number") radius = 1 // For collision detection
 
-  // Game state
-  @type("number") health = 100
-  @type("number") maxHealth = 100
-  @type("number") kills = 0
-  @type("number") deaths = 0 // Added missing deaths property
-  @type("number") level = 1
-  @type("number") experience = 0
-  @type("boolean") isRespawning = false
-  @type("number") respawnTime = 3 // seconds
-
-  // Battle room specific properties
-  @type("number") score = 0
-  @type("boolean") isAlive = true
-
-  // Combat
-  @type("number") lastShotTime = 0
-  @type({ array: "string" }) abilities = new Array<string>()
-  @type({ map: "number" }) abilityCooldowns = new Map<string, number>()
-  @type("number") lastAbilityUseTime = 0
-
-  // Animation state - useful for client-side animation
+  // General player state (common for all player types)
   @type("string") animationState = "idle" // idle, running, jumping, attacking, etc.
+  @type("number") joinedAt = 0
+  @type("string") status = "connected" // e.g., "connected", "in-lobby", "in-game"
 
-  // Lobby specific properties (moved from LobbyPlayer to Player for simplicity)
-  @type("boolean") ready = false // Added missing ready property
-  @type("string") selectedGameType = "" // Added missing selectedGameType property
-  @type("number") joinedAt = 0 // Added joinedAt for consistency
-  @type("string") status = "connected" // Added status for consistency
+  // Lobby specific properties (kept on base Player as it interacts with Hub/Lobby)
+  @type("boolean") ready = false
+  @type("string") selectedGameType = ""
 
   constructor() {
     super()
     this.joinedAt = Date.now()
-  }
-
-  canShoot(): boolean {
-    const now = Date.now()
-    const cooldown = 500 // 0.5 seconds
-    return now - this.lastShotTime > cooldown
-  }
-
-  canUseAbility(abilityId: string): boolean {
-    return !this.abilityCooldowns.has(abilityId) || (this.abilityCooldowns.get(abilityId) || 0) <= 0
-  }
-
-  setAbilityCooldown(abilityId: string, cooldown = 5000) {
-    this.abilityCooldowns.set(abilityId, cooldown)
-    this.lastAbilityUseTime = Date.now()
-  }
-
-  updateCooldowns() {
-    const now = Date.now()
-
-    this.abilityCooldowns.forEach((cooldownEnd, abilityId) => {
-      if (now >= cooldownEnd) {
-        this.abilityCooldowns.delete(abilityId)
-      }
-    })
   }
 
   // Helper method to update rotation from Euler angles (in radians)
@@ -101,46 +56,12 @@ export class Player extends Schema {
     return forward
   }
 
-  takeDamage(damage: number): boolean {
-    this.health = Math.max(0, this.health - damage)
-    if (this.health <= 0 && this.isAlive) {
-      this.isAlive = false
-      this.deaths++
-      this.isRespawning = true
-      return true // Player died
-    }
-    return false // Player still alive
-  }
-
-  heal(amount: number) {
-    this.health = Math.min(this.maxHealth, this.health + amount)
-  }
-
-  respawn() {
-    this.health = this.maxHealth
-    this.isAlive = true
-    this.isRespawning = false
-    this.position.x = 0
-    this.position.y = 0
-    this.position.z = 0
-  }
-
-  addKill() {
-    this.kills++
-    this.score += 100 // 100 points per kill
-    this.experience += 50 // 50 XP per kill
-  }
-
-  addScore(points: number) {
-    this.score += points
-  }
-
-  // Method to set player ready state
+  // Method to set player ready state (for lobby)
   setReady(isReady: boolean) {
     this.ready = isReady
   }
 
-  // Method to set selected game type
+  // Method to set selected game type (for lobby)
   selectGameType(gameType: string) {
     this.selectedGameType = gameType
   }

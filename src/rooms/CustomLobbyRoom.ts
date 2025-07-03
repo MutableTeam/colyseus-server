@@ -1,5 +1,6 @@
 import { Room, type Client } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
+import type { Player } from "../schemas/Player" // Ensure Player is imported
 
 export class CustomLobbyRoom extends Room<LobbyState> {
   maxClients = 50
@@ -89,7 +90,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       try {
         console.log(`🎯 LobbyRoom: Player ${client.sessionId} ready state message:`, message)
 
-        const player = this.state.players.get(client.sessionId)
+        const player = this.state.players.get(client.sessionId) as Player // Cast to Player
         if (!player) {
           console.log(`❌ LobbyRoom: Player ${client.sessionId} not found in state`)
           client.send("error", { message: "Player not found in lobby" })
@@ -132,7 +133,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       const { gameType } = message
       console.log(`🎮 Player ${client.sessionId} selected game type: ${gameType}`)
 
-      const player = this.state.players.get(client.sessionId)
+      const player = this.state.players.get(client.sessionId) as Player // Cast to Player
       if (player) {
         player.selectGameType(gameType) // Use the selectGameType method
       }
@@ -150,7 +151,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`🧪 LobbyRoom: Test message received from ${client.sessionId}:`, message)
 
-      const player = this.state.players.get(client.sessionId)
+      const player = this.state.players.get(client.sessionId) as Player // Cast to Player
       const playerCount = this.state.players.size
       let readyCount = 0
 
@@ -285,7 +286,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     })
 
     // Update player's selected game type in lobby state
-    const player = this.state.players.get(client.sessionId)
+    const player = this.state.players.get(client.sessionId) as Player // Cast to Player
     if (player) {
       player.selectGameType(gameType)
     }
