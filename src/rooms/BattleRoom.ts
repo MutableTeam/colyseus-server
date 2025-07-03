@@ -1,7 +1,6 @@
 import { Room, type Client } from "@colyseus/core"
 import { BattleState } from "../schemas/BattleState"
 import type { BattlePlayer } from "../schemas/BattlePlayer"
-import { Vector3D } from "../schemas/Vector3D"
 
 export class BattleRoom extends Room<BattleState> {
   maxClients = 16
@@ -36,20 +35,12 @@ export class BattleRoom extends Room<BattleState> {
   }
 
   private setupMessageHandlers() {
-    // Handle player movement (for Three.js)
+    // Handle player movement (simplified)
     this.onMessage("player_move", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId) as BattlePlayer
       if (player && message.position) {
-        player.position.x = message.position.x
-        player.position.y = message.position.y
-        player.position.z = message.position.z
-
-        if (message.rotation) {
-          player.rotation.x = message.rotation.x
-          player.rotation.y = message.rotation.y
-          player.rotation.z = message.rotation.z
-          player.rotation.w = message.rotation.w
-        }
+        player.x = message.position.x || player.x
+        player.y = message.position.y || player.y
       }
     })
 
@@ -62,14 +53,11 @@ export class BattleRoom extends Room<BattleState> {
       if (player) {
         // Handle different action types
         switch (message.type) {
-          case "shoot":
-            this.handlePlayerShoot(client, message)
-            break
-          case "jump":
-            this.handlePlayerJump(client, message)
+          case "attack":
+            this.handlePlayerAttack(client, message)
             break
           case "ability":
-            success = this.useAbility(player, abilityType, message.targetPosition || null)
+            success = this.state.usePlayerAbility(player.sessionId, abilityType, message.targetPosition || null)
             break
         }
       }
@@ -79,7 +67,7 @@ export class BattleRoom extends Room<BattleState> {
         this.broadcast("player_used_ability", {
           playerId: client.sessionId,
           abilityType: abilityType,
-          position: player?.position,
+          position: { x: player?.x, y: player?.y },
           timestamp: Date.now(),
         })
       } else if (message.type === "ability") {
@@ -126,25 +114,11 @@ export class BattleRoom extends Room<BattleState> {
     this.onMessage("move", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId) as BattlePlayer
       if (player && player.isAlive) {
-        const { position, rotation, velocity, animationState } = message
+        const { position, animationState } = message
 
         if (position) {
-          player.position.x = position.x
-          player.position.y = position.y
-          player.position.z = position.z
-        }
-
-        if (rotation) {
-          player.rotation.x = rotation.x
-          player.rotation.y = rotation.y
-          player.rotation.z = rotation.z
-          player.rotation.w = rotation.w
-        }
-
-        if (velocity) {
-          player.velocity.x = velocity.x
-          player.velocity.y = velocity.y
-          player.velocity.z = velocity.z
+          player.x = position.x
+          player.y = position.y
         }
 
         if (animationState) {
@@ -153,64 +127,11 @@ export class BattleRoom extends Room<BattleState> {
       }
     })
 
-    // Handle shooting
-    this.onMessage("shoot", (client: Client, message: any) => {
-      const player = this.state.players.get(client.sessionId) as BattlePlayer
-      if (player && player.isAlive && player.canShoot()) {
-        const { direction, position } = message
-
-        // Create projectile
-        const projectileId = `${client.sessionId}_${Date.now()}`
-        const projectilePosition = new Vector3D()
-        projectilePosition.x = position?.x || player.position.x
-        projectilePosition.y = position?.y || player.position.y + 1.5 // Eye level
-        projectilePosition.z = position?.z || player.position.z
-
-        const projectileDirection = new Vector3D()
-        projectileDirection.x = direction.x
-        projectileDirection.y = direction.y
-        projectileDirection.z = direction.z
-
-        this.state.createProjectile(
-          projectileId,
-          client.sessionId,
-          projectilePosition,
-          projectileDirection,
-          50, // speed
-          25, // damage
-        )
-
-        player.lastShotTime = Date.now()
-
-        // Broadcast shot event
-        this.broadcast("player_shot", {
-          playerId: client.sessionId,
-          projectileId,
-          position: projectilePosition,
-          direction: projectileDirection,
-        })
-      }
-    })
-
-    // Handle ability usage
-    this.onMessage("use_ability", (client: Client, message: any) => {
+    // Handle attack actions
+    this.onMessage("attack", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId) as BattlePlayer
       if (player && player.isAlive) {
-        const { abilityId, targetPosition } = message
-
-        if (player.canUseAbility(abilityId)) {
-          const success = this.useAbility(player, abilityId, targetPosition)
-
-          if (success) {
-            player.setAbilityCooldown(abilityId)
-
-            this.broadcast("ability_used", {
-              playerId: client.sessionId,
-              abilityId,
-              targetPosition,
-            })
-          }
-        }
+        this.handlePlayerAttack(client, message)
       }
     })
 
@@ -386,7 +307,7 @@ export class BattleRoom extends Room<BattleState> {
       timestamp: Date.now(),
     })
 
-    // Initialize Three.js scene data for all players
+    // Initialize scene data for all players
     this.broadcast("initialize_scene", {
       mapTheme: this.state.mapName,
       players: this.getPlayersArray(),
@@ -394,49 +315,17 @@ export class BattleRoom extends Room<BattleState> {
     })
   }
 
-  private handlePlayerShoot(client: Client, message: any) {
+  private handlePlayerAttack(client: Client, message: any) {
     const player = this.state.players.get(client.sessionId) as BattlePlayer
     if (!player || !this.gameStarted) return
 
-    // Create projectile using the method on BattleState
-    const projectile = this.state.addProjectile(
-      client.sessionId,
-      message.position,
-      message.direction,
-      message.weaponType || "default",
-    )
-
-    // Broadcast to all players
-    this.broadcast("player_shot", {
+    // Broadcast attack to all players
+    this.broadcast("player_attacked", {
       playerId: client.sessionId,
-      projectileId: projectile.id,
-      position: message.position,
-      direction: message.direction,
-      weaponType: message.weaponType || "default",
+      attackType: message.attackType || "basic",
+      position: { x: player.x, y: player.y },
       timestamp: Date.now(),
     })
-  }
-
-  private handlePlayerJump(client: Client, message: any) {
-    const player = this.state.players.get(client.sessionId) as BattlePlayer
-    if (!player || !this.gameStarted) return
-
-    // Broadcast jump to all players
-    this.broadcast(
-      "player_jumped",
-      {
-        playerId: client.sessionId,
-        position: message.position,
-        velocity: message.velocity,
-        timestamp: Date.now(),
-      },
-      { except: client },
-    )
-  }
-
-  private useAbility(player: BattlePlayer, abilityType: string, targetPosition: any): boolean {
-    // Placeholder for ability logic
-    return true
   }
 
   private getPlayersArray() {
@@ -451,6 +340,8 @@ export class BattleRoom extends Room<BattleState> {
         isAlive: player.isAlive,
         kills: player.kills,
         deaths: player.deaths,
+        x: player.x,
+        y: player.y,
       })
     })
     return players

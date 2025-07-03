@@ -1,16 +1,5 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema"
 import { BattlePlayer } from "./BattlePlayer"
-import { Projectile } from "./Projectile"
-import { Vector3D } from "./Vector3D"
-
-// Define map objects for Three.js environment
-export class MapObject extends Schema {
-  @type("string") id = ""
-  @type("string") type = "" // Type of object (wall, platform, etc.)
-  @type(Vector3D) position = new Vector3D()
-  @type(Vector3D) scale = new Vector3D(1, 1, 1)
-  @type("number") rotation = 0 // Simple Y-axis rotation for static objects
-}
 
 // Simple spawn point structure
 export class SpawnPoint extends Schema {
@@ -28,8 +17,7 @@ export class SpawnPoint extends Schema {
 
 export class BattleState extends Schema {
   @type({ map: BattlePlayer }) players = new MapSchema<BattlePlayer>()
-  @type({ map: Projectile }) projectiles = new MapSchema<Projectile>()
-  @type([MapObject]) mapObjects = new ArraySchema<MapObject>()
+  @type([SpawnPoint]) spawnPoints = new ArraySchema<SpawnPoint>()
 
   // Map properties (simplified)
   @type("string") mapName = "default"
@@ -45,10 +33,9 @@ export class BattleState extends Schema {
   @type("boolean") gameActive = true
   @type("number") killLimit = 25
   @type("string") winner = ""
-  @type([SpawnPoint]) spawnPoints = new ArraySchema<SpawnPoint>()
   @type("number") lastUpdate = 0
 
-  constructor(mapWidth = 100, mapLength = 100, mapHeight = 50) {
+  constructor() {
     super()
     this.gameTime = 0
     this.gameActive = true
@@ -86,9 +73,8 @@ export class BattleState extends Schema {
 
     // Set spawn position
     const spawnPoint = this.getRandomSpawnPoint()
-    player.position.x = spawnPoint.x
-    player.position.y = spawnPoint.y
-    player.position.z = spawnPoint.z
+    player.x = spawnPoint.x
+    player.y = spawnPoint.y
 
     this.players.set(sessionId, player)
     return player
@@ -97,111 +83,6 @@ export class BattleState extends Schema {
   removePlayer(sessionId: string): boolean {
     if (this.players.has(sessionId)) {
       this.players.delete(sessionId)
-      return true
-    }
-    return false
-  }
-
-  // Fixed method name to match usage in BattleRoom
-  addProjectile(
-    playerId: string,
-    position: Vector3D | { x: number; y: number; z: number },
-    direction: Vector3D | { x: number; y: number; z: number },
-    weaponType: string,
-  ): Projectile {
-    const projectile = new Projectile()
-    projectile.id = `${playerId}_${Date.now()}`
-    projectile.ownerId = playerId
-    projectile.playerId = playerId
-    projectile.weaponType = weaponType
-
-    // Handle both Vector3D and plain objects for position
-    if (position instanceof Vector3D) {
-      projectile.position.x = position.x
-      projectile.position.y = position.y
-      projectile.position.z = position.z
-    } else {
-      projectile.position.x = position.x
-      projectile.position.y = position.y
-      projectile.position.z = position.z
-    }
-
-    // Handle both Vector3D and plain objects for direction
-    if (direction instanceof Vector3D) {
-      projectile.setDirection(direction.x, direction.y, direction.z)
-    } else {
-      projectile.setDirection(direction.x, direction.y, direction.z)
-    }
-
-    // Set weapon-specific properties
-    switch (weaponType) {
-      case "rifle":
-        projectile.speed = 50
-        projectile.damage = 25
-        projectile.lifetime = 3
-        break
-      case "pistol":
-        projectile.speed = 40
-        projectile.damage = 20
-        projectile.lifetime = 2
-        break
-      case "shotgun":
-        projectile.speed = 30
-        projectile.damage = 50
-        projectile.lifetime = 1.5
-        break
-      default:
-        projectile.speed = 45
-        projectile.damage = 25
-        projectile.lifetime = 2.5
-        break
-    }
-
-    this.projectiles.set(projectile.id, projectile)
-    return projectile
-  }
-
-  // Alternative method name for consistency
-  createProjectile(
-    id: string,
-    ownerId: string,
-    position: Vector3D | { x: number; y: number; z: number },
-    direction: Vector3D | { x: number; y: number; z: number },
-    speed = 50,
-    damage = 25,
-  ): Projectile {
-    const projectile = new Projectile()
-    projectile.id = id
-    projectile.ownerId = ownerId
-    projectile.playerId = ownerId
-
-    // Handle both Vector3D and plain objects
-    if (position instanceof Vector3D) {
-      projectile.position.x = position.x
-      projectile.position.y = position.y
-      projectile.position.z = position.z
-    } else {
-      projectile.position.x = position.x
-      projectile.position.y = position.y
-      projectile.position.z = position.z
-    }
-
-    if (direction instanceof Vector3D) {
-      projectile.setDirection(direction.x, direction.y, direction.z)
-    } else {
-      projectile.setDirection(direction.x, direction.y, direction.z)
-    }
-
-    projectile.speed = speed
-    projectile.damage = damage
-
-    this.projectiles.set(id, projectile)
-    return projectile
-  }
-
-  removeProjectile(id: string): boolean {
-    if (this.projectiles.has(id)) {
-      this.projectiles.delete(id)
       return true
     }
     return false
@@ -300,56 +181,22 @@ export class BattleState extends Schema {
     const player = this.players.get(sessionId)
     if (player && !player.isAlive) {
       const spawnPoint = this.getRandomSpawnPoint()
-      player.position.x = spawnPoint.x
-      player.position.y = spawnPoint.y
-      player.position.z = spawnPoint.z
+      player.x = spawnPoint.x
+      player.y = spawnPoint.y
       player.respawn()
       return true
     }
     return false
   }
 
-  // Added missing usePlayerAbility method
+  // Simple ability usage without complex logic
   usePlayerAbility(sessionId: string, abilityType: string): boolean {
     const player = this.players.get(sessionId)
     if (player && player.isAlive) {
-      // Implement actual ability logic and cooldowns here
-      // For now, just return true to simulate success
+      // Implement basic ability logic here
       console.log(`Player ${player.name} used ability: ${abilityType}`)
       return true
     }
     return false
-  }
-
-  // Update all projectiles
-  updateProjectiles(deltaTime: number) {
-    this.projectiles.forEach((projectile) => {
-      projectile.update(deltaTime)
-    })
-  }
-
-  // Get all active projectiles
-  getActiveProjectiles(): Projectile[] {
-    const activeProjectiles: Projectile[] = []
-    this.projectiles.forEach((projectile) => {
-      if (projectile.isActive) {
-        activeProjectiles.push(projectile)
-      }
-    })
-    return activeProjectiles
-  }
-
-  // Clean up inactive projectiles
-  cleanupProjectiles() {
-    const toRemove: string[] = []
-    this.projectiles.forEach((projectile, id) => {
-      if (!projectile.isActive) {
-        toRemove.push(id)
-      }
-    })
-
-    toRemove.forEach((id) => {
-      this.removeProjectile(id)
-    })
   }
 }
