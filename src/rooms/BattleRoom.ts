@@ -8,8 +8,8 @@ export class BattleRoom extends Room<BattleState> {
   maxClients = 16
   private gameStarted = false
   private gameStartTimer: any = null
-  private collisionManager: CollisionManager
-  private abilityManager: AbilityManager
+  private collisionManager: CollisionManager = new CollisionManager() // Fixed initialization
+  private abilityManager: AbilityManager = new AbilityManager() // Fixed initialization
   private gameLoopInterval: any
   private lastUpdate: number = Date.now()
 
@@ -36,8 +36,8 @@ export class BattleRoom extends Room<BattleState> {
     this.state.gameStarted = false
 
     // Initialize managers
-    this.collisionManager = new CollisionManager()
-    this.abilityManager = new AbilityManager()
+    // this.collisionManager = new CollisionManager()
+    // this.abilityManager = new AbilityManager()
 
     // Set up message handlers
     this.setupMessageHandlers()
@@ -82,7 +82,7 @@ export class BattleRoom extends Room<BattleState> {
             this.handlePlayerJump(client, message)
             break
           case "ability":
-            success = player && this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
+            success = this.gameStarted ? this.state.usePlayerAbility(client.sessionId, abilityType) : false
             break
         }
       }
@@ -95,7 +95,7 @@ export class BattleRoom extends Room<BattleState> {
           position: player?.position, // Safely access player.position
           timestamp: Date.now(),
         })
-      } else {
+      } else if (message.type === "ability") {
         // Send failure message to player
         client.send("ability_failed", {
           abilityType: abilityType,
@@ -127,7 +127,7 @@ export class BattleRoom extends Room<BattleState> {
         totalPlayers: playerCount,
         gameStarted: this.gameStarted,
         gameMode: this.state.gameMode,
-        mapTheme: this.state.mapTheme,
+        mapTheme: this.state.mapName,
         connectedClients: this.clients.length, // Added connectedClients
       })
 
@@ -389,7 +389,6 @@ export class BattleRoom extends Room<BattleState> {
         fromLobby: options.fromLobby || false,
       }
     } catch (error: any) {
-      // Explicitly type error as any
       console.error(`❌ BattleRoom: Authentication failed for ${client.sessionId}:`, error.message)
       throw error
     }
@@ -420,7 +419,7 @@ export class BattleRoom extends Room<BattleState> {
         playerName: username,
         playerCount: playerCount,
         gameMode: this.state.gameMode,
-        mapTheme: this.state.mapTheme,
+        mapTheme: this.state.mapName,
         gameStarted: this.gameStarted,
         timestamp: Date.now(),
       })
@@ -430,7 +429,7 @@ export class BattleRoom extends Room<BattleState> {
         players: this.getPlayersArray(),
         gameStarted: this.gameStarted,
         gameMode: this.state.gameMode,
-        mapTheme: this.state.mapTheme,
+        mapTheme: this.state.mapName,
         timestamp: Date.now(),
       })
 
@@ -456,7 +455,6 @@ export class BattleRoom extends Room<BattleState> {
         this.scheduleGameStart()
       }
     } catch (error: any) {
-      // Explicitly type error as any
       console.error(`❌ BattleRoom: Error in onJoin for ${client.sessionId}:`, error)
       client.send("error", { message: "Failed to join battle room" })
     }
@@ -497,14 +495,14 @@ export class BattleRoom extends Room<BattleState> {
     this.broadcast("game_started", {
       message: "Battle has begun!",
       gameMode: this.state.gameMode,
-      mapTheme: this.state.mapTheme,
+      mapTheme: this.state.mapName,
       playerCount: this.state.players.size,
       timestamp: Date.now(),
     })
 
     // Initialize Three.js scene data for all players
     this.broadcast("initialize_scene", {
-      mapTheme: this.state.mapTheme,
+      mapTheme: this.state.mapName,
       players: this.getPlayersArray(),
       timestamp: Date.now(),
     })
@@ -583,7 +581,7 @@ export class BattleRoom extends Room<BattleState> {
       totalPlayers: playerCount,
       gameStarted: this.gameStarted,
       gameMode: this.state.gameMode,
-      mapTheme: this.state.mapTheme,
+      mapTheme: this.state.mapName,
       timestamp: Date.now(),
     })
 
@@ -625,7 +623,6 @@ export class BattleRoom extends Room<BattleState> {
         this.endGame("Not enough players")
       }
     } catch (error: any) {
-      // Explicitly type error as any
       console.error(`❌ BattleRoom: Error in onLeave for ${client.sessionId}:`, error)
     }
   }

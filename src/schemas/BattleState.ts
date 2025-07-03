@@ -230,4 +230,16 @@ export class BattleState extends Schema {
     }
     return false
   }
+
+  // Added missing usePlayerAbility method
+  usePlayerAbility(sessionId: string, abilityType: string): boolean {
+    const player = this.players.get(sessionId)
+    if (player && player.isAlive) {
+      // Implement actual ability logic and cooldowns here
+      // For now, just return true to simulate success
+      console.log(`Player ${player.name} used ability: ${abilityType}`)
+      return true
+    }
+    return false
+  }
 }

@@ -8,6 +8,7 @@ export class Projectile extends Schema {
   @type(Vector3D) direction = new Vector3D()
   @type("number") speed = 50
   @type("number") damage = 25
+  @type("number") radius = 0.1 // Added missing radius property
   @type("boolean") isActive = true
   @type("number") createdAt = 0
   @type("number") distanceTraveled = 0

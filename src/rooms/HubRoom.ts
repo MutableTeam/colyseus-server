@@ -318,7 +318,7 @@ export class HubRoom extends Room<HubState> {
     console.log(`📊 HubRoom: WebSocket clients: ${this.clients.length}`)
 
     // CRITICAL: Force state change notification
-    this.state.lastUpdate = Date.now()
+    this.state.lastUpdated = Date.now()
 
     console.log(`✅ HubRoom: Successfully added player ${username} (${client.sessionId})`)
     console.log(`📊 HubRoom: Hub now has ${this.state.totalPlayers} players`)
@@ -335,7 +335,7 @@ export class HubRoom extends Room<HubState> {
     console.log(`📊 HubRoom: Player count after leave: ${this.state.totalPlayers}`)
 
     // CRITICAL: Force state change notification
-    this.state.lastUpdate = Date.now()
+    this.state.lastUpdated = Date.now()
 
     // Broadcast player count update to remaining clients
     this.broadcast("player_count_update", {

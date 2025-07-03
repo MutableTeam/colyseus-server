@@ -3,6 +3,7 @@ import { Schema, type } from "@colyseus/schema"
 export class LobbyPlayer extends Schema {
   @type("string") id = ""
   @type("string") name = ""
+  @type("string") username = "" // Added missing username property
   @type("string") sessionId = ""
   @type("boolean") ready = false
   @type("string") selectedGameType = ""
