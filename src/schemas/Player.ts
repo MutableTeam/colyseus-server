@@ -6,10 +6,6 @@ export class Player extends Schema {
   @type("string") name = ""
   @type("string") characterType = "default"
 
-  // Basic state
-  @type("string") status = "connected" // connected, ready, in-game
-  @type("string") animationState = "idle"
-
   // Lobby/Hub specific properties
   @type("boolean") ready = false
   @type("string") selectedGameType = ""
@@ -27,17 +23,10 @@ export class Player extends Schema {
   // Lobby/Hub methods
   setReady(ready: boolean) {
     this.ready = ready
-    this.lastUpdate = Date.now()
   }
 
   selectGameType(gameType: string) {
     this.selectedGameType = gameType
-    this.lastUpdate = Date.now()
-  }
-
-  setStatus(status: string) {
-    this.status = status
-    this.lastUpdate = Date.now()
   }
 
   // Update player state

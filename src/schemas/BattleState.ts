@@ -1,107 +1,227 @@
-import { Schema, MapSchema, type } from "@colyseus/schema"
+import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema"
 import { BattlePlayer } from "./BattlePlayer"
+import { Projectile } from "./Projectile"
+import { Vector3D } from "./Vector3D"
+
+// Define map objects for Three.js environment
+export class MapObject extends Schema {
+  @type("string") id = ""
+  @type("string") type = "" // Type of object (wall, platform, etc.)
+  @type(Vector3D) position = new Vector3D()
+  @type(Vector3D) scale = new Vector3D(1, 1, 1)
+  @type("number") rotation = 0 // Simple Y-axis rotation for static objects
+}
+
+// Simple spawn point structure
+export class SpawnPoint extends Schema {
+  @type("number") x = 0
+  @type("number") y = 0
+  @type("number") z = 0
+
+  constructor(x = 0, y = 0, z = 0) {
+    super()
+    this.x = x
+    this.y = y
+    this.z = z
+  }
+}
 
 export class BattleState extends Schema {
   @type({ map: BattlePlayer }) players = new MapSchema<BattlePlayer>()
+  @type({ map: Projectile }) projectiles = new MapSchema<Projectile>()
+  @type([MapObject]) mapObjects = new ArraySchema<MapObject>()
 
-  // Game state (simplified)
+  // Map properties (simplified)
+  @type("string") mapName = "default"
+  @type("string") mapTheme = "default"
+
+  // Game state (simplified for room management)
   @type("boolean") gameStarted = false
   @type("boolean") gameEnded = false
   @type("number") gameStartTime = 0
-  @type("number") gameEndTime = 0
+  @type("number") gameTime = 0
+  @type("number") maxGameTime = 300 // 5 minutes
   @type("string") gameMode = "deathmatch"
-  @type("boolean") gameActive = false
+  @type("boolean") gameActive = true
   @type("number") killLimit = 25
   @type("string") winner = ""
+  @type([SpawnPoint]) spawnPoints = new ArraySchema<SpawnPoint>()
   @type("number") lastUpdate = 0
 
-  // Room settings
-  @type("string") roomName = ""
-  @type("number") maxPlayers = 16
-  @type("number") minPlayersToStart = 2
-
-  constructor() {
+  constructor(mapWidth = 100, mapLength = 100, mapHeight = 50) {
     super()
-    this.gameActive = false
+    this.gameTime = 0
+    this.gameActive = true
     this.lastUpdate = Date.now()
+    this.initializeSpawnPoints()
   }
 
-  // Player management
-  addPlayer(sessionId: string, name: string, characterType: string): BattlePlayer {
+  private initializeSpawnPoints() {
+    // Add default spawn points
+    const spawnPositions = [
+      { x: 10, y: 0, z: 10 },
+      { x: -10, y: 0, z: 10 },
+      { x: 10, y: 0, z: -10 },
+      { x: -10, y: 0, z: -10 },
+      { x: 0, y: 0, z: 15 },
+      { x: 0, y: 0, z: -15 },
+      { x: 15, y: 0, z: 0 },
+      { x: -15, y: 0, z: 0 },
+    ]
+
+    spawnPositions.forEach((pos) => {
+      const spawnPoint = new SpawnPoint(pos.x, pos.y, pos.z)
+      this.spawnPoints.push(spawnPoint)
+    })
+  }
+
+  addPlayer(sessionId: string, name: string, characterType: string, fromLobby: boolean): BattlePlayer {
     const player = new BattlePlayer()
     player.id = sessionId
     player.sessionId = sessionId
     player.name = name
     player.characterType = characterType
-    player.joinBattle()
+    player.isAlive = true
+    player.health = player.maxHealth
+
+    // Set spawn position
+    const spawnPoint = this.getRandomSpawnPoint()
+    player.position.x = spawnPoint.x
+    player.position.y = spawnPoint.y
+    player.position.z = spawnPoint.z
 
     this.players.set(sessionId, player)
-    this.lastUpdate = Date.now()
     return player
   }
 
   removePlayer(sessionId: string): boolean {
-    const player = this.players.get(sessionId)
-    if (player) {
-      player.leaveBattle()
+    if (this.players.has(sessionId)) {
       this.players.delete(sessionId)
-      this.lastUpdate = Date.now()
       return true
     }
     return false
   }
 
-  // Game state management
-  startGame() {
-    this.gameStarted = true
-    this.gameActive = true
-    this.gameStartTime = Date.now()
-    this.lastUpdate = Date.now()
+  // Fixed method name to match usage in BattleRoom
+  addProjectile(
+    playerId: string,
+    position: Vector3D | { x: number; y: number; z: number },
+    direction: Vector3D | { x: number; y: number; z: number },
+    weaponType: string,
+  ): Projectile {
+    const projectile = new Projectile()
+    projectile.id = `${playerId}_${Date.now()}`
+    projectile.ownerId = playerId
+    projectile.playerId = playerId
+    projectile.weaponType = weaponType
 
-    // Set all players as in battle
-    this.players.forEach((player) => {
-      player.joinBattle()
-    })
+    // Handle both Vector3D and plain objects for position
+    if (position instanceof Vector3D) {
+      projectile.position.x = position.x
+      projectile.position.y = position.y
+      projectile.position.z = position.z
+    } else {
+      projectile.position.x = position.x
+      projectile.position.y = position.y
+      projectile.position.z = position.z
+    }
+
+    // Handle both Vector3D and plain objects for direction
+    if (direction instanceof Vector3D) {
+      projectile.setDirection(direction.x, direction.y, direction.z)
+    } else {
+      projectile.setDirection(direction.x, direction.y, direction.z)
+    }
+
+    // Set weapon-specific properties
+    switch (weaponType) {
+      case "rifle":
+        projectile.speed = 50
+        projectile.damage = 25
+        projectile.lifetime = 3
+        break
+      case "pistol":
+        projectile.speed = 40
+        projectile.damage = 20
+        projectile.lifetime = 2
+        break
+      case "shotgun":
+        projectile.speed = 30
+        projectile.damage = 50
+        projectile.lifetime = 1.5
+        break
+      default:
+        projectile.speed = 45
+        projectile.damage = 25
+        projectile.lifetime = 2.5
+        break
+    }
+
+    this.projectiles.set(projectile.id, projectile)
+    return projectile
   }
 
-  endGame(winner?: string) {
-    this.gameActive = false
-    this.gameEnded = true
-    this.gameEndTime = Date.now()
-    this.winner = winner || this.findWinner()
-    this.lastUpdate = Date.now()
+  // Alternative method name for consistency
+  createProjectile(
+    id: string,
+    ownerId: string,
+    position: Vector3D | { x: number; y: number; z: number },
+    direction: Vector3D | { x: number; y: number; z: number },
+    speed = 50,
+    damage = 25,
+  ): Projectile {
+    const projectile = new Projectile()
+    projectile.id = id
+    projectile.ownerId = ownerId
+    projectile.playerId = ownerId
 
-    // Update match statistics
-    this.players.forEach((player) => {
-      player.matchesPlayed++
-      if (player.name === this.winner) {
-        player.matchesWon++
+    // Handle both Vector3D and plain objects
+    if (position instanceof Vector3D) {
+      projectile.position.x = position.x
+      projectile.position.y = position.y
+      projectile.position.z = position.z
+    } else {
+      projectile.position.x = position.x
+      projectile.position.y = position.y
+      projectile.position.z = position.z
+    }
+
+    if (direction instanceof Vector3D) {
+      projectile.setDirection(direction.x, direction.y, direction.z)
+    } else {
+      projectile.setDirection(direction.x, direction.y, direction.z)
+    }
+
+    projectile.speed = speed
+    projectile.damage = damage
+
+    this.projectiles.set(id, projectile)
+    return projectile
+  }
+
+  removeProjectile(id: string): boolean {
+    if (this.projectiles.has(id)) {
+      this.projectiles.delete(id)
+      return true
+    }
+    return false
+  }
+
+  getRandomSpawnPoint(): SpawnPoint {
+    const randomIndex = Math.floor(Math.random() * this.spawnPoints.length)
+    return this.spawnPoints[randomIndex]
+  }
+
+  updateGameTime(deltaTime: number) {
+    if (this.gameActive) {
+      this.gameTime += deltaTime
+      if (this.gameTime >= this.maxGameTime) {
+        this.endGame()
       }
-    })
+    }
+    this.lastUpdate = Date.now()
   }
 
-  private findWinner(): string {
-    let topPlayer: BattlePlayer | null = null
-    let topScore = 0
-
-    this.players.forEach((player) => {
-      if (player.score > topScore) {
-        topScore = player.score
-        topPlayer = player
-      }
-    })
-
-    return topPlayer?.name || "No Winner"
-  }
-
-  // Check if game should start
-  canStartGame(): boolean {
-    const playerCount = this.players.size
-    const readyCount = this.getReadyPlayerCount()
-    return playerCount >= this.minPlayersToStart && readyCount === playerCount && !this.gameStarted
-  }
-
-  // Check win condition
   checkWinCondition(): string | null {
     if (!this.gameActive) return this.winner
 
@@ -109,7 +229,8 @@ export class BattleState extends Schema {
     let topPlayer: BattlePlayer | null = null
     let topKills = 0
 
-    this.players.forEach((player) => {
+    // Use Array.from to convert MapSchema to array for proper iteration
+    Array.from(this.players.values()).forEach((player: BattlePlayer) => {
       if (player.kills > topKills) {
         topKills = player.kills
         topPlayer = player
@@ -117,11 +238,31 @@ export class BattleState extends Schema {
     })
 
     if (topKills >= this.killLimit && topPlayer) {
-      this.endGame(topPlayer.name)
+      this.winner = topPlayer.name
+      this.endGame()
       return this.winner
     }
 
     return null
+  }
+
+  endGame() {
+    this.gameActive = false
+    if (!this.winner) {
+      // Find player with most kills
+      let topPlayer: BattlePlayer | null = null
+      let topKills = 0
+
+      // Use Array.from to convert MapSchema to array for proper iteration
+      Array.from(this.players.values()).forEach((player: BattlePlayer) => {
+        if (player.kills > topKills) {
+          topKills = player.kills
+          topPlayer = player
+        }
+      })
+
+      this.winner = topPlayer?.name || "No Winner"
+    }
   }
 
   getLeaderboard(): Array<{ name: string; kills: number; deaths: number; score: number }> {
@@ -136,54 +277,79 @@ export class BattleState extends Schema {
       })
     })
 
-    // Sort by score, then by kills
+    // Sort by kills, then by score
     return leaderboard.sort((a, b) => {
-      if (a.score !== b.score) {
-        return b.score - a.score
+      if (a.kills !== b.kills) {
+        return b.kills - a.kills
       }
-      return b.kills - a.kills
+      return b.score - a.score
     })
   }
 
-  getReadyPlayerCount(): number {
-    let readyCount = 0
+  getAlivePlayers(): BattlePlayer[] {
+    const alivePlayers: BattlePlayer[] = []
     this.players.forEach((player) => {
-      if (player.ready) {
-        readyCount++
+      if (player.isAlive) {
+        alivePlayers.push(player)
       }
     })
-    return readyCount
+    return alivePlayers
   }
 
-  getAllPlayers(): BattlePlayer[] {
-    const players: BattlePlayer[] = []
-    this.players.forEach((player) => {
-      players.push(player)
+  respawnPlayer(sessionId: string): boolean {
+    const player = this.players.get(sessionId)
+    if (player && !player.isAlive) {
+      const spawnPoint = this.getRandomSpawnPoint()
+      player.position.x = spawnPoint.x
+      player.position.y = spawnPoint.y
+      player.position.z = spawnPoint.z
+      player.respawn()
+      return true
+    }
+    return false
+  }
+
+  // Added missing usePlayerAbility method
+  usePlayerAbility(sessionId: string, abilityType: string): boolean {
+    const player = this.players.get(sessionId)
+    if (player && player.isAlive) {
+      // Implement actual ability logic and cooldowns here
+      // For now, just return true to simulate success
+      console.log(`Player ${player.name} used ability: ${abilityType}`)
+      return true
+    }
+    return false
+  }
+
+  // Update all projectiles
+  updateProjectiles(deltaTime: number) {
+    this.projectiles.forEach((projectile) => {
+      projectile.update(deltaTime)
     })
-    return players
   }
 
-  getPlayerCount(): number {
-    return this.players.size
+  // Get all active projectiles
+  getActiveProjectiles(): Projectile[] {
+    const activeProjectiles: Projectile[] = []
+    this.projectiles.forEach((projectile) => {
+      if (projectile.isActive) {
+        activeProjectiles.push(projectile)
+      }
+    })
+    return activeProjectiles
   }
 
-  // Reset game state for new match
-  resetGame() {
-    this.gameStarted = false
-    this.gameEnded = false
-    this.gameActive = false
-    this.winner = ""
-    this.gameStartTime = 0
-    this.gameEndTime = 0
-    this.lastUpdate = Date.now()
+  // Clean up inactive projectiles
+  cleanupProjectiles() {
+    const toRemove: string[] = []
+    this.projectiles.forEach((projectile, id) => {
+      if (!projectile.isActive) {
+        toRemove.push(id)
+      }
+    })
 
-    // Reset player states
-    this.players.forEach((player) => {
-      player.kills = 0
-      player.deaths = 0
-      player.score = 0
-      player.isAlive = true
-      player.ready = false
+    toRemove.forEach((id) => {
+      this.removeProjectile(id)
     })
   }
 }

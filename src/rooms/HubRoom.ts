@@ -211,4 +211,111 @@ export class HubRoom extends Room<HubState> {
       // Sanitize username
       username = username.trim().substring(0, 20)
 
-      console.log(`✅ HubRoom: Authentication successful for ${
+      console.log(`✅ HubRoom: Authentication successful for ${client.sessionId} (${username})`)
+      console.log(`📊 HubRoom: Will have ${this.clients.length + 1} clients after join`)
+
+      return {
+        username: username,
+        authenticated: true,
+        joinTime: Date.now(),
+      }
+    } catch (error) {
+      console.error(
+        `❌ HubRoom: Authentication failed for ${client.sessionId}:`,
+        error instanceof Error ? error.message : String(error),
+      )
+      throw error
+    }
+  }
+
+  onJoin(client: Client, options: any) {
+    console.log(`🚪 HubRoom: Player ${client.sessionId} entering the hub`)
+    console.log(`📊 HubRoom: Client count before adding to state: ${this.clients.length}`)
+
+    const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
+
+    try {
+      // Add player to state and get updated total count
+      const totalPlayers = this.state.addPlayer(client.sessionId, username)
+
+      console.log(`📊 HubRoom: Player count after join: ${totalPlayers}`)
+      console.log(`📊 HubRoom: WebSocket clients: ${this.clients.length}`)
+
+      // CRITICAL: Force state change notification
+      this.state.lastUpdate = Date.now()
+
+      // Send welcome message with hub status
+      client.send("hub_welcome", {
+        message: "Welcome to the game hub!",
+        totalPlayers: totalPlayers,
+        serverStatus: this.state.serverStatus,
+        availableLobbies: this.state.getAllAvailableLobbies(),
+        timestamp: Date.now(),
+      })
+
+      // Broadcast player count update to all clients
+      this.broadcast("player_count_update", {
+        totalPlayers: totalPlayers,
+        timestamp: Date.now(),
+      })
+
+      // Also send current state to the new client
+      client.send("hub_state_update", {
+        totalPlayers: totalPlayers,
+        serverStatus: this.state.serverStatus,
+        timestamp: Date.now(),
+      })
+
+      console.log(`✅ HubRoom: Successfully added player ${username} (${client.sessionId})`)
+      console.log(`📊 HubRoom: Hub now has ${totalPlayers} players`)
+    } catch (error) {
+      console.error(`❌ HubRoom: Error in onJoin for ${client.sessionId}:`, error)
+      // Don't throw here as it might cause the 4002 error
+    }
+  }
+
+  onLeave(client: Client, consented: boolean) {
+    console.log(`👋 HubRoom: Player ${client.sessionId} left the hub (consented: ${consented})`)
+    console.log(`📊 HubRoom: Client count before removal: ${this.clients.length}`)
+
+    try {
+      // Remove player from state and get updated total count
+      const result = this.state.removePlayer(client.sessionId)
+
+      console.log(`📊 HubRoom: Player count after leave: ${result.totalPlayers}`)
+
+      // CRITICAL: Force state change notification
+      this.state.lastUpdate = Date.now()
+
+      // Broadcast player count update to remaining clients
+      this.broadcast("player_count_update", {
+        totalPlayers: result.totalPlayers,
+        timestamp: Date.now(),
+      })
+
+      console.log(`📊 HubRoom: Hub now has ${result.totalPlayers} players`)
+    } catch (error) {
+      console.error(`❌ HubRoom: Error in onLeave for ${client.sessionId}:`, error)
+    }
+  }
+
+  onDispose() {
+    console.log("🏠 HubRoom: Room disposing...")
+    if (this.lobbyUpdateInterval) {
+      clearInterval(this.lobbyUpdateInterval)
+    }
+    console.log("🏠 HubRoom: Room disposed")
+  }
+
+  onError(client: Client, error: any) {
+    console.error(`❌ HubRoom: Client ${client.sessionId} error:`, error)
+    console.error(`❌ HubRoom: Error details:`, {
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+    })
+  }
+
+  // Disable auto-dispose to keep hub persistent
+  autoDispose = false
+}
