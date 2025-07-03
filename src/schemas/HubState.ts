@@ -1,123 +1,111 @@
 import { Schema, MapSchema, type } from "@colyseus/schema"
-import { GameListing } from "./GameListing"
+
+export class HubPlayer extends Schema {
+  @type("string") sessionId = ""
+  @type("string") username = ""
+  @type("number") joinedAt = 0
+}
+
+export class DiscoveredLobby extends Schema {
+  @type("string") id = ""
+  @type("string") name = ""
+  @type("string") type = ""
+  @type("number") currentPlayers = 0
+  @type("number") maxPlayers = 0
+  @type("number") createdAt = 0
+  @type("boolean") locked = false
+  @type("boolean") private = false
+}
 
 export class HubState extends Schema {
-  @type({ map: GameListing }) availableRooms = new MapSchema<GameListing>()
-  @type({ map: GameListing }) availableLobbies = new MapSchema<GameListing>()
+  @type({ map: HubPlayer }) players = new MapSchema<HubPlayer>()
+  @type({ map: DiscoveredLobby }) discoveredLobbies = new MapSchema<DiscoveredLobby>()
+  @type("string") serverStatus = "online"
   @type("number") totalPlayers = 0
-  @type("number") totalRooms = 0
-  @type("number") totalLobbies = 0
-  @type("number") lastUpdated = 0
+  @type("number") lastUpdate: number = Date.now()
 
-  constructor() {
-    super()
-    this.lastUpdated = Date.now()
+  addPlayer(sessionId: string, username: string) {
+    const player = new HubPlayer()
+    player.sessionId = sessionId
+    player.username = username
+    player.joinedAt = Date.now()
+
+    this.players.set(sessionId, player)
+    this.totalPlayers = this.players.size
+    this.lastUpdate = Date.now()
+
+    console.log(`🔄 HubState: Added player ${username}, total players now: ${this.totalPlayers}`)
+
+    // Return the updated count for immediate broadcasting
+    return this.totalPlayers
   }
 
-  addRoom(roomId: string, roomData: any) {
-    const listing = new GameListing()
-    listing.roomId = roomId
-    listing.name = roomData.name || `Room_${roomId.substring(0, 8)}`
-    listing.gameType = roomData.gameType || "unknown"
-    listing.currentPlayers = roomData.currentPlayers || 0
-    listing.maxPlayers = roomData.maxPlayers || 8
-    listing.isPublic = roomData.isPublic !== false
-    listing.gameStarted = roomData.gameStarted || false
-    listing.createdAt = roomData.createdAt || Date.now()
+  removePlayer(sessionId: string) {
+    const removed = this.players.delete(sessionId)
+    this.totalPlayers = this.players.size
+    this.lastUpdate = Date.now()
 
-    this.availableRooms.set(roomId, listing)
-    this.updateCounts()
+    console.log(`🔄 HubState: Removed player ${sessionId}, total players now: ${this.totalPlayers}`)
+
+    // Return the updated count for immediate broadcasting
+    return { removed, totalPlayers: this.totalPlayers }
   }
 
-  addLobby(lobbyId: string, lobbyData: any) {
-    const listing = new GameListing()
-    listing.roomId = lobbyId
-    listing.name = lobbyData.name || `Lobby_${lobbyId.substring(0, 8)}`
-    listing.gameType = "lobby"
-    listing.currentPlayers = lobbyData.currentPlayers || 0
-    listing.maxPlayers = lobbyData.maxPlayers || 8
-    listing.isPublic = lobbyData.isPublic !== false
-    listing.gameStarted = false
-    listing.createdAt = lobbyData.createdAt || Date.now()
-
-    this.availableLobbies.set(lobbyId, listing)
-    this.updateCounts()
-  }
-
-  removeRoom(roomId: string) {
-    if (this.availableRooms.has(roomId)) {
-      this.availableRooms.delete(roomId)
-      this.updateCounts()
-    }
-  }
-
-  removeLobby(lobbyId: string) {
-    if (this.availableLobbies.has(lobbyId)) {
-      this.availableLobbies.delete(lobbyId)
-      this.updateCounts()
-    }
-  }
-
-  updateRoom(roomId: string, roomData: any) {
-    const listing = this.availableRooms.get(roomId)
-    if (listing) {
-      listing.currentPlayers = roomData.currentPlayers || listing.currentPlayers
-      listing.gameStarted = roomData.gameStarted || listing.gameStarted
-      this.updateCounts()
-    }
-  }
-
-  updateLobby(lobbyId: string, lobbyData: any) {
-    const listing = this.availableLobbies.get(lobbyId)
-    if (listing) {
-      listing.currentPlayers = lobbyData.currentPlayers || listing.currentPlayers
-      this.updateCounts()
-    }
-  }
-
-  private updateCounts() {
-    this.totalRooms = this.availableRooms.size
-    this.totalLobbies = this.availableLobbies.size
-
-    let playerCount = 0
-    this.availableRooms.forEach((room) => {
-      playerCount += room.currentPlayers
+  getAllAvailableLobbies() {
+    const lobbies: any[] = []
+    this.discoveredLobbies.forEach((lobby) => {
+      lobbies.push({
+        id: lobby.id,
+        name: lobby.name,
+        type: lobby.type,
+        currentPlayers: lobby.currentPlayers,
+        maxPlayers: lobby.maxPlayers,
+        createdAt: lobby.createdAt,
+        locked: lobby.locked,
+        private: lobby.private,
+      })
     })
-    this.availableLobbies.forEach((lobby) => {
-      playerCount += lobby.currentPlayers
-    })
+    return lobbies
+  }
 
-    this.totalPlayers = playerCount
-    this.lastUpdated = Date.now()
+  getLobbiesByType(gameType: string) {
+    const lobbies: any[] = []
+    this.discoveredLobbies.forEach((lobby) => {
+      if (lobby.type === gameType) {
+        lobbies.push({
+          id: lobby.id,
+          name: lobby.name,
+          type: lobby.type,
+          currentPlayers: lobby.currentPlayers,
+          maxPlayers: lobby.maxPlayers,
+          createdAt: lobby.createdAt,
+          locked: lobby.locked,
+          private: lobby.private,
+        })
+      }
+    })
+    return lobbies
   }
 
   updateAvailableLobbies(lobbies: any[]) {
     // Clear existing lobbies
-    this.availableLobbies.clear()
+    this.discoveredLobbies.clear()
 
     // Add new lobbies
-    lobbies.forEach((lobby) => {
-      this.addLobby(lobby.roomId, lobby)
-    })
-  }
+    lobbies.forEach((lobbyData) => {
+      const lobby = new DiscoveredLobby()
+      lobby.id = lobbyData.id
+      lobby.name = lobbyData.name
+      lobby.type = lobbyData.type
+      lobby.currentPlayers = lobbyData.currentPlayers
+      lobby.maxPlayers = lobbyData.maxPlayers
+      lobby.createdAt = lobbyData.createdAt
+      lobby.locked = lobbyData.locked
+      lobby.private = lobbyData.private
 
-  getPublicRooms(): GameListing[] {
-    const publicRooms: GameListing[] = []
-    this.availableRooms.forEach((room) => {
-      if (room.isPublic) {
-        publicRooms.push(room)
-      }
+      this.discoveredLobbies.set(lobbyData.id, lobby)
     })
-    return publicRooms
-  }
 
-  getPublicLobbies(): GameListing[] {
-    const publicLobbies: GameListing[] = []
-    this.availableLobbies.forEach((lobby) => {
-      if (lobby.isPublic) {
-        publicLobbies.push(lobby)
-      }
-    })
-    return publicLobbies
+    this.lastUpdate = Date.now()
   }
 }

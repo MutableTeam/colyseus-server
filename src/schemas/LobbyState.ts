@@ -1,20 +1,10 @@
 import { Schema, MapSchema, type } from "@colyseus/schema"
-import { LobbyPlayer } from "./LobbyPlayer"
+import { Player } from "./Player"
 import { GameListing } from "./GameListing"
 
 export class LobbyState extends Schema {
-  @type({ map: LobbyPlayer }) players = new MapSchema<LobbyPlayer>()
+  @type({ map: Player }) players = new MapSchema<Player>()
   @type({ map: GameListing }) availableGames = new MapSchema<GameListing>()
-  @type("number") totalPlayers = 0
-  @type("number") readyPlayers = 0
-  @type("boolean") gameSessionActive = false
-  @type("string") gameSessionType = ""
-  @type("number") lastUpdated = 0
-
-  constructor() {
-    super()
-    this.lastUpdated = Date.now()
-  }
 
   createGame(id: string, type: string, name: string, maxPlayers: number, creatorId: string) {
     const game = new GameListing()
@@ -27,7 +17,6 @@ export class LobbyState extends Schema {
     game.currentPlayers = 1
 
     this.availableGames.set(id, game)
-    this.updateStats()
     return game
   }
 
@@ -36,7 +25,6 @@ export class LobbyState extends Schema {
     if (game && game.currentPlayers < game.maxPlayers && !game.locked) {
       game.playerIds.set(playerId, playerId)
       game.currentPlayers++
-      this.updateStats()
       return true
     }
     return false
@@ -54,13 +42,13 @@ export class LobbyState extends Schema {
       }
       // If creator left, assign a new creator
       else if (playerId === game.creatorId) {
+        // Get the keys as an array of strings
         const playerIdsArray = Array.from(game.playerIds.keys()) as string[]
         if (playerIdsArray.length > 0) {
           game.creatorId = playerIdsArray[0]
         }
       }
 
-      this.updateStats()
       return true
     }
     return false
@@ -74,37 +62,21 @@ export class LobbyState extends Schema {
     })
   }
 
-  addPlayer(id: string, name: string, sessionId?: string) {
-    const player = new LobbyPlayer()
+  addPlayer(id: string, name: string) {
+    const player = new Player()
     player.id = id
     player.name = name
-    player.sessionId = sessionId || id
-    player.ready = false
+    player.ready = false // Initialize ready state to false
     this.players.set(id, player)
-    this.updateStats()
     return player
   }
 
   removePlayer(id: string) {
     if (this.players.has(id)) {
       this.players.delete(id)
-      this.updateStats()
       return true
     }
     return false
-  }
-
-  updateStats() {
-    this.totalPlayers = this.players.size
-    this.readyPlayers = 0
-
-    this.players.forEach((player) => {
-      if (player.ready) {
-        this.readyPlayers++
-      }
-    })
-
-    this.lastUpdated = Date.now()
   }
 
   cleanupStaleGames() {
@@ -116,19 +88,19 @@ export class LobbyState extends Schema {
         this.availableGames.delete(gameId)
       }
     })
-
-    this.updateStats()
   }
 
   getActiveLobbiesByGameType(gameType: string) {
     const activeLobbies: GameListing[] = []
 
     this.availableGames.forEach((game) => {
+      // Check if the game matches the requested type and isn't locked
       if (game.type === gameType && !game.locked && game.currentPlayers < game.maxPlayers) {
         activeLobbies.push(game)
       }
     })
 
+    // Sort by creation time (newest first)
     return activeLobbies.sort((a, b) => b.createdAt - a.createdAt)
   }
 
@@ -136,31 +108,13 @@ export class LobbyState extends Schema {
     const activeLobbies: GameListing[] = []
 
     this.availableGames.forEach((game) => {
+      // Only include games that aren't locked and have space
       if (!game.locked && game.currentPlayers < game.maxPlayers) {
         activeLobbies.push(game)
       }
     })
 
+    // Sort by creation time (newest first)
     return activeLobbies.sort((a, b) => b.createdAt - a.createdAt)
-  }
-
-  getReadyPlayers(): LobbyPlayer[] {
-    const readyPlayers: LobbyPlayer[] = []
-    this.players.forEach((player) => {
-      if (player.ready) {
-        readyPlayers.push(player)
-      }
-    })
-    return readyPlayers
-  }
-
-  getPlayersByGameType(gameType: string): LobbyPlayer[] {
-    const players: LobbyPlayer[] = []
-    this.players.forEach((player) => {
-      if (player.selectedGameType === gameType) {
-        players.push(player)
-      }
-    })
-    return players
   }
 }
