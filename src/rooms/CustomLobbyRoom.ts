@@ -335,8 +335,8 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           gameRoomName = "BattleRoom"
       }
 
-      // Create the game room
-      const gameRoom = await this.presence.create(gameRoomName, {
+      // Create the game room using matchMaker
+      const gameRoom = await this.presence.matchMaker.createRoom(gameRoomName, {
         ...gameOptions,
         roomName: `${this.state.gameType}_${Date.now().toString().substring(8)}`,
       })

@@ -61,23 +61,4 @@ export class Player extends Schema {
   isNear(other: Player, distance: number): boolean {
     return this.getDistance(other) <= distance
   }
-
-  // Serialization
-  toJSON() {
-    return {
-      id: this.id,
-      sessionId: this.sessionId,
-      name: this.name,
-      characterType: this.characterType,
-      x: this.x,
-      y: this.y,
-      z: this.z,
-      animationState: this.animationState,
-      isConnected: this.isConnected,
-      ready: this.ready,
-      selectedGameType: this.selectedGameType,
-      joinTime: this.joinTime,
-      lastUpdateTime: this.lastUpdateTime,
-    }
-  }
 }

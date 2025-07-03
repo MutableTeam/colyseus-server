@@ -147,7 +147,8 @@ export class LobbyState extends Schema {
   removeAvailableLobby(lobbyId: string): boolean {
     for (let i = 0; i < this.availableLobbies.length; i++) {
       if (this.availableLobbies[i].id === lobbyId) {
-        this.availableLobbies.deleteAt(i)
+        // Use splice to remove the item at index i
+        this.availableLobbies.splice(i, 1)
         this.lastUpdate = Date.now()
         return true
       }
