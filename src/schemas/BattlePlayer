@@ -121,4 +121,22 @@ export class BattlePlayer extends Player {
       kdr: this.deaths > 0 ? this.kills / this.deaths : this.kills,
     }
   }
+
+  // Override toJSON to include battle-specific properties
+  toJSON() {
+    return {
+      ...super.toJSON(),
+      health: this.health,
+      maxHealth: this.maxHealth,
+      kills: this.kills,
+      deaths: this.deaths,
+      score: this.score,
+      isAlive: this.isAlive,
+      isRespawning: this.isRespawning,
+      respawnTime: this.respawnTime,
+      deathTime: this.deathTime,
+      lastShotTime: this.lastShotTime,
+      shotCooldown: this.shotCooldown,
+    }
+  }
 }
