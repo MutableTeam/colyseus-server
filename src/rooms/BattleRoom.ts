@@ -41,6 +41,7 @@ export class BattleRoom extends Room<BattleState> {
       if (player && message.position) {
         player.x = message.position.x || player.x
         player.y = message.position.y || player.y
+        player.z = message.position.z || player.z // Include z for consistency
       }
     })
 
@@ -57,7 +58,8 @@ export class BattleRoom extends Room<BattleState> {
             this.handlePlayerAttack(client, message)
             break
           case "ability":
-            success = this.state.usePlayerAbility(player.sessionId, abilityType, message.targetPosition || null)
+            // FIX: Call usePlayerAbility with 2 arguments as defined in BattleState
+            success = this.state.usePlayerAbility(player.sessionId, abilityType)
             break
         }
       }
@@ -67,7 +69,7 @@ export class BattleRoom extends Room<BattleState> {
         this.broadcast("player_used_ability", {
           playerId: client.sessionId,
           abilityType: abilityType,
-          position: { x: player?.x, y: player?.y },
+          position: { x: player?.x, y: player?.y, z: player?.z }, // Include z
           timestamp: Date.now(),
         })
       } else if (message.type === "ability") {
@@ -119,6 +121,7 @@ export class BattleRoom extends Room<BattleState> {
         if (position) {
           player.x = position.x
           player.y = position.y
+          player.z = position.z // Include z
         }
 
         if (animationState) {
@@ -323,7 +326,7 @@ export class BattleRoom extends Room<BattleState> {
     this.broadcast("player_attacked", {
       playerId: client.sessionId,
       attackType: message.attackType || "basic",
-      position: { x: player.x, y: player.y },
+      position: { x: player.x, y: player.y, z: player.z }, // Include z
       timestamp: Date.now(),
     })
   }
@@ -342,6 +345,7 @@ export class BattleRoom extends Room<BattleState> {
         deaths: player.deaths,
         x: player.x,
         y: player.y,
+        z: player.z, // Include z
       })
     })
     return players

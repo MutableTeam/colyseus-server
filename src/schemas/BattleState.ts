@@ -71,10 +71,11 @@ export class BattleState extends Schema {
     player.isAlive = true
     player.health = player.maxHealth
 
-    // Set spawn position
+    // Set spawn position using x, y from SpawnPoint
     const spawnPoint = this.getRandomSpawnPoint()
     player.x = spawnPoint.x
     player.y = spawnPoint.y
+    player.z = spawnPoint.z // Also set z for consistency, even if not actively used for movement
 
     this.players.set(sessionId, player)
     return player
@@ -183,6 +184,7 @@ export class BattleState extends Schema {
       const spawnPoint = this.getRandomSpawnPoint()
       player.x = spawnPoint.x
       player.y = spawnPoint.y
+      player.z = spawnPoint.z
       player.respawn()
       return true
     }

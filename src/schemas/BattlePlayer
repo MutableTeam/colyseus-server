@@ -1,78 +1,67 @@
-import { type } from "@colyseus/schema"
-import { Player } from "./Player"
+import { type, MapSchema } from "@colyseus/schema"
+import { Player } from "./Player" // Import the base Player schema
 
 export class BattlePlayer extends Player {
-  // Battle-specific properties (simplified for room management)
   @type("number") health = 100
   @type("number") maxHealth = 100
+  @type("boolean") isAlive = true
   @type("number") kills = 0
   @type("number") deaths = 0
   @type("number") score = 0
-
-  // Status
-  @type("boolean") isAlive = true
-  @type("boolean") isRespawning = false
+  @type("number") lastShotTime = 0 // For simple cooldowns
   @type("number") respawnTime = 5 // seconds
-  @type("number") deathTime = 0
+  @type("boolean") isRespawning = false
+  @type({ map: "number" }) abilityCooldowns = new MapSchema<number>() // Map of abilityId to cooldown end time
 
-  constructor() {
-    super()
+  constructor(id?: string, sessionId?: string, name?: string) {
+    super(id, sessionId, name)
     this.health = this.maxHealth
     this.isAlive = true
+    this.kills = 0
+    this.deaths = 0
+    this.score = 0
   }
 
-  // Basic combat methods (simplified)
-  takeDamage(amount: number): boolean {
-    if (!this.isAlive) return false
-
+  takeDamage(amount: number) {
     this.health -= amount
-
     if (this.health <= 0) {
-      this.die()
-      return true
+      this.health = 0
+      this.isAlive = false
+      this.deaths++
+      this.isRespawning = true
     }
-
-    return false
   }
 
   heal(amount: number) {
-    if (!this.isAlive) return
-    this.health = Math.min(this.maxHealth, this.health + amount)
-  }
-
-  die() {
-    this.isAlive = false
-    this.health = 0
-    this.deaths++
-    this.deathTime = Date.now()
-    this.isRespawning = true
+    this.health += amount
+    if (this.health > this.maxHealth) {
+      this.health = this.maxHealth
+    }
   }
 
   respawn() {
-    this.isAlive = true
     this.health = this.maxHealth
+    this.isAlive = true
     this.isRespawning = false
+    // Position will be set by BattleState's respawnPlayer
   }
 
   addKill() {
     this.kills++
-    this.score += 100
+    this.score += 100 // Example score
   }
 
-  addScore(points: number) {
-    this.score += points
+  canShoot(): boolean {
+    // Simple cooldown: 0.5 seconds between shots
+    return Date.now() - this.lastShotTime > 500
   }
 
-  // Get player stats for leaderboard
-  getStats() {
-    return {
-      name: this.name,
-      kills: this.kills,
-      deaths: this.deaths,
-      score: this.score,
-      health: this.health,
-      isAlive: this.isAlive,
-      kdr: this.deaths > 0 ? this.kills / this.deaths : this.kills,
-    }
+  canUseAbility(abilityId: string): boolean {
+    const cooldownEndTime = this.abilityCooldowns.get(abilityId) || 0
+    return Date.now() > cooldownEndTime
+  }
+
+  setAbilityCooldown(abilityId: string, durationMs = 3000) {
+    this.abilityCooldowns.set(abilityId, Date.now() + durationMs)
   }
 }
