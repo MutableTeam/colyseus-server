@@ -173,7 +173,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       // Also send current lobby stats
       this.broadcastLobbyStats()
 
-      console.log(`📊 Lobby: Sent test response with ${playerCount} total, ${readyCount} ready players to ${client.sessionId}`)
+      console.log(
+        `📊 Lobby: Sent test response with ${playerCount} total, ${readyCount} ready players to ${client.sessionId}`,
+      )
     })
 
     // Handle ping/heartbeat messages
@@ -195,4 +197,132 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       timestamp: Date.now(),
     })
 
-    console.log(`🏛️ LobbyRoom ${this.roomId} is\
+    console.log(`🏛️ LobbyRoom ${this.roomId} is now ready for players!`)
+  }
+
+  onJoin(client: Client, options: any) {
+    console.log(`${client.sessionId} joined CustomLobbyRoom with options:`, options)
+
+    // Add player to state
+    this.state.addPlayer(client.sessionId, options.username || `Player_${client.sessionId.substring(0, 6)}`)
+
+    // Welcome the new player
+    client.send("lobby_welcome", {
+      message: "Welcome to the Lobby!",
+      playerCount: this.clients.length,
+      sessionId: client.sessionId,
+    })
+
+    // Broadcast updated stats
+    this.broadcastLobbyStats()
+  }
+
+  onLeave(client: Client, consented: boolean) {
+    console.log(`${client.sessionId} left CustomLobbyRoom (consented: ${consented})`)
+
+    // Remove player from state
+    this.state.removePlayer(client.sessionId)
+
+    // Remove from game session if they were in one
+    this.removePlayerFromGameSession(client.sessionId)
+
+    // Broadcast updated stats
+    this.broadcastLobbyStats()
+  }
+
+  onDispose() {
+    console.log("CustomLobbyRoom disposed")
+  }
+
+  private broadcastLobbyStats() {
+    const stats = {
+      totalPlayers: this.clients.length,
+      readyPlayers: this.getReadyPlayerCount(),
+      gameSessionActive: !!this.gameSession,
+      gameSessionType: this.gameSession?.gameType || null,
+      timestamp: Date.now(),
+    }
+
+    this.broadcast("lobby_stats_update", stats)
+  }
+
+  private getReadyPlayerCount(): number {
+    let readyCount = 0
+    this.state.players.forEach((player) => {
+      if (player.ready) readyCount++
+    })
+    return readyCount
+  }
+
+  private joinOrCreateGameSession(client: Client, gameType: string) {
+    console.log(`🎮 Player ${client.sessionId} joining/creating game session for ${gameType}`)
+
+    if (!this.gameSession) {
+      // Create new game session
+      this.gameSession = {
+        gameType: gameType,
+        players: new Map(),
+        createdAt: Date.now(),
+      }
+    }
+
+    // Add player to game session
+    this.gameSession.players.set(client.sessionId, {
+      sessionId: client.sessionId,
+      ready: false,
+      joinedAt: Date.now(),
+    })
+
+    // Update player's selected game type in lobby state
+    const player = this.state.players.get(client.sessionId)
+    if (player) {
+      player.selectedGameType = gameType
+    }
+
+    // Notify client about joining game session
+    client.send("game_session_joined", {
+      gameType: gameType,
+      sessionPlayers: this.gameSession.players.size,
+    })
+
+    this.broadcastLobbyStats()
+  }
+
+  private removePlayerFromGameSession(sessionId: string) {
+    if (this.gameSession && this.gameSession.players.has(sessionId)) {
+      this.gameSession.players.delete(sessionId)
+
+      // If no players left in game session, remove it
+      if (this.gameSession.players.size === 0) {
+        this.gameSession = null
+      }
+
+      this.broadcastLobbyStats()
+    }
+  }
+
+  private checkAndStartGameSession() {
+    if (!this.gameSession) return
+
+    const readyPlayers = Array.from(this.gameSession.players.values()).filter((p) => p.ready)
+
+    if (readyPlayers.length >= 2) {
+      console.log(`🚀 Starting game session with ${readyPlayers.length} ready players`)
+
+      // Notify all ready players to join the actual game room
+      readyPlayers.forEach((player) => {
+        const client = this.clients.find((c) => c.sessionId === player.sessionId)
+        if (client) {
+          client.send("start_game", {
+            gameType: this.gameSession.gameType,
+            playerCount: readyPlayers.length,
+          })
+        }
+      })
+
+      // Clear the game session
+      this.gameSession = null
+      this.broadcastLobbyStats()
+    }
+  }
+}
