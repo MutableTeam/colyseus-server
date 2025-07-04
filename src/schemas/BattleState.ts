@@ -119,7 +119,7 @@ export class BattleState extends Schema {
       }
     })
 
-    if (topKills >= this.killLimit && topPlayer) {
+    if (topKills >= this.killLimit && topPlayer !== null) {
       this.winner = topPlayer.name
       this.endGame()
       return this.winner
@@ -146,7 +146,7 @@ export class BattleState extends Schema {
         }
       })
 
-      this.winner = topPlayer?.name || "No Winner"
+      this.winner = topPlayer !== null ? topPlayer.name : "No Winner"
     }
   }
 
