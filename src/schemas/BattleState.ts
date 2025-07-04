@@ -111,8 +111,8 @@ export class BattleState extends Schema {
     let topPlayer: BattlePlayer | null = null
     let topKills = 0
 
-    // Use Array.from to convert MapSchema to array for proper iteration
-    Array.from(this.players.values()).forEach((player: BattlePlayer) => {
+    // Correct way to iterate over MapSchema in Colyseus
+    this.players.forEach((player: BattlePlayer) => {
       if (player.kills > topKills) {
         topKills = player.kills
         topPlayer = player
@@ -138,8 +138,8 @@ export class BattleState extends Schema {
       let topPlayer: BattlePlayer | null = null
       let topKills = 0
 
-      // Use Array.from to convert MapSchema to array for proper iteration
-      Array.from(this.players.values()).forEach((player: BattlePlayer) => {
+      // Correct way to iterate over MapSchema in Colyseus
+      this.players.forEach((player: BattlePlayer) => {
         if (player.kills > topKills) {
           topKills = player.kills
           topPlayer = player
