@@ -10,23 +10,17 @@ export class Player extends Schema {
   @type("number") z = 0
   @type("string") animationState = "idle"
   @type("boolean") isConnected = true
+  @type("boolean") ready = false
+  @type("string") selectedGameType = ""
   @type("number") joinTime = 0
   @type("number") lastUpdateTime = 0
 
-  // Lobby-specific properties
-  @type("boolean") ready = false
-  @type("string") selectedGameType = ""
-
-  constructor(id?: string, sessionId?: string, name?: string) {
+  constructor() {
     super()
-    if (id) this.id = id
-    if (sessionId) this.sessionId = sessionId
-    if (name) this.name = name
     this.joinTime = Date.now()
     this.lastUpdateTime = Date.now()
   }
 
-  // Position methods
   setPosition(x: number, y: number, z = 0) {
     this.x = x
     this.y = y
@@ -34,7 +28,6 @@ export class Player extends Schema {
     this.update()
   }
 
-  // Lobby methods
   setReady(ready: boolean) {
     this.ready = ready
     this.update()
@@ -45,12 +38,20 @@ export class Player extends Schema {
     this.update()
   }
 
-  // Update timestamp
+  setAnimationState(state: string) {
+    this.animationState = state
+    this.update()
+  }
+
+  setConnected(connected: boolean) {
+    this.isConnected = connected
+    this.update()
+  }
+
   update() {
     this.lastUpdateTime = Date.now()
   }
 
-  // Utility methods
   getDistance(other: Player): number {
     const dx = this.x - other.x
     const dy = this.y - other.y

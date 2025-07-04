@@ -1,4 +1,4 @@
-import { Room, type Client } from "@colyseus/core"
+import { Room, type Client, matchMaker } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
 import type { Player } from "../schemas/Player"
 
@@ -336,7 +336,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       }
 
       // Create the game room using matchMaker
-      const gameRoom = await this.presence.matchMaker.createRoom(gameRoomName, {
+      const gameRoom = await matchMaker.createRoom(gameRoomName, {
         ...gameOptions,
         roomName: `${this.state.gameType}_${Date.now().toString().substring(8)}`,
       })

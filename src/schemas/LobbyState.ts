@@ -3,38 +3,60 @@ import { Player } from "./Player"
 
 export class GameLobby extends Schema {
   @type("string") id = ""
-  @type("string") name = ""
   @type("string") gameType = ""
-  @type("string") gameMode = ""
-  @type("string") mapTheme = ""
+  @type("string") gameName = ""
   @type("number") maxPlayers = 8
-  @type("number") currentPlayers = 0
-  @type("boolean") isPublic = true
-  @type("boolean") isStarted = false
-  @type("string") hostId = ""
+  @type("string") creatorId = ""
   @type("number") createdAt = 0
+  @type([Player]) players = new ArraySchema<Player>()
 
-  constructor(id: string, name: string, gameType: string, hostId: string) {
+  constructor() {
     super()
-    this.id = id
-    this.name = name
-    this.gameType = gameType
-    this.hostId = hostId
     this.createdAt = Date.now()
+  }
+
+  addPlayer(player: Player): boolean {
+    if (this.players.length < this.maxPlayers) {
+      this.players.push(player)
+      return true
+    }
+    return false
+  }
+
+  removePlayer(sessionId: string): boolean {
+    const index = this.players.findIndex((p) => p.sessionId === sessionId)
+    if (index !== -1) {
+      this.players.splice(index, 1)
+      return true
+    }
+    return false
+  }
+
+  isFull(): boolean {
+    return this.players.length >= this.maxPlayers
+  }
+
+  isEmpty(): boolean {
+    return this.players.length === 0
   }
 }
 
 export class LobbyState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>()
-  @type([GameLobby]) availableLobbies = new ArraySchema<GameLobby>()
+  @type([GameLobby]) availableGames = new ArraySchema<GameLobby>()
+
+  // Lobby settings
   @type("string") lobbyName = ""
-  @type("string") gameType = ""
+  @type("string") gameType = "battle"
   @type("string") gameMode = "deathmatch"
   @type("string") mapTheme = "default"
   @type("number") maxPlayers = 8
   @type("boolean") isPublic = true
   @type("string") hostId = ""
+
+  // Game state
   @type("boolean") gameStarted = false
+  @type("boolean") countdownActive = false
   @type("number") countdown = 0
   @type("number") lastUpdate = 0
 
@@ -43,16 +65,18 @@ export class LobbyState extends Schema {
     this.lastUpdate = Date.now()
   }
 
-  addPlayer(sessionId: string, name: string, characterType = "default"): Player {
-    const player = new Player(sessionId, sessionId, name)
+  // Player management
+  addPlayer(sessionId: string, name: string, characterType: string): Player {
+    const player = new Player()
+    player.id = sessionId
+    player.sessionId = sessionId
+    player.name = name
     player.characterType = characterType
     player.ready = false
     player.selectedGameType = this.gameType
 
     this.players.set(sessionId, player)
     this.lastUpdate = Date.now()
-
-    console.log(`✅ LobbyState: Added player ${name} (${sessionId})`)
     return player
   }
 
@@ -60,21 +84,13 @@ export class LobbyState extends Schema {
     if (this.players.has(sessionId)) {
       this.players.delete(sessionId)
       this.lastUpdate = Date.now()
-      console.log(`✅ LobbyState: Removed player ${sessionId}`)
       return true
     }
     return false
   }
 
-  setPlayerReady(sessionId: string, ready: boolean): boolean {
-    const player = this.players.get(sessionId)
-    if (player) {
-      player.ready = ready
-      this.lastUpdate = Date.now()
-      console.log(`✅ LobbyState: Player ${player.name} ready: ${ready}`)
-      return true
-    }
-    return false
+  getPlayer(sessionId: string): Player | undefined {
+    return this.players.get(sessionId)
   }
 
   getAllPlayers(): Player[] {
@@ -85,6 +101,11 @@ export class LobbyState extends Schema {
     return playerList
   }
 
+  getPlayerCount(): number {
+    return this.players.size
+  }
+
+  // Ready system
   getReadyPlayers(): Player[] {
     const readyPlayers: Player[] = []
     this.players.forEach((player) => {
@@ -107,26 +128,14 @@ export class LobbyState extends Schema {
     return allReady
   }
 
-  getPlayerCount(): number {
-    return this.players.size
-  }
-
   canStartGame(): boolean {
-    const playerCount = this.getPlayerCount()
-    const readyCount = this.getReadyPlayers().length
-
-    // Need at least 2 players and all must be ready
-    return playerCount >= 2 && readyCount === playerCount && this.areAllPlayersReady()
+    return this.getPlayerCount() >= 2 && this.areAllPlayersReady()
   }
 
+  // Game settings
   setGameType(gameType: string) {
     this.gameType = gameType
     this.lastUpdate = Date.now()
-
-    // Update all players' selected game type
-    this.players.forEach((player) => {
-      player.selectedGameType = gameType
-    })
   }
 
   setGameMode(gameMode: string) {
@@ -139,78 +148,143 @@ export class LobbyState extends Schema {
     this.lastUpdate = Date.now()
   }
 
-  addAvailableLobby(lobby: GameLobby) {
-    this.availableLobbies.push(lobby)
-    this.lastUpdate = Date.now()
-  }
-
-  removeAvailableLobby(lobbyId: string): boolean {
-    for (let i = 0; i < this.availableLobbies.length; i++) {
-      if (this.availableLobbies[i].id === lobbyId) {
-        // Use splice to remove the item at index i
-        this.availableLobbies.splice(i, 1)
-        this.lastUpdate = Date.now()
-        return true
-      }
-    }
-    return false
-  }
-
-  updateLobbyPlayerCount(lobbyId: string, playerCount: number) {
-    for (let i = 0; i < this.availableLobbies.length; i++) {
-      if (this.availableLobbies[i].id === lobbyId) {
-        this.availableLobbies[i].currentPlayers = playerCount
-        this.lastUpdate = Date.now()
-        break
-      }
-    }
-  }
-
-  getAvailableLobbies(): GameLobby[] {
-    const lobbies: GameLobby[] = []
-    this.availableLobbies.forEach((lobby) => {
-      lobbies.push(lobby)
-    })
-    return lobbies
-  }
-
-  startCountdown(seconds = 5) {
+  // Countdown system
+  startCountdown(seconds: number) {
+    this.countdownActive = true
     this.countdown = seconds
     this.lastUpdate = Date.now()
   }
 
   updateCountdown(): boolean {
-    if (this.countdown > 0) {
-      this.countdown--
-      this.lastUpdate = Date.now()
-      return this.countdown === 0
+    if (!this.countdownActive) return false
+
+    this.countdown--
+    this.lastUpdate = Date.now()
+
+    if (this.countdown <= 0) {
+      this.countdownActive = false
+      return true // Countdown finished
     }
     return false
   }
 
   resetCountdown() {
+    this.countdownActive = false
     this.countdown = 0
     this.lastUpdate = Date.now()
   }
 
+  // Game state
   startGame() {
     this.gameStarted = true
+    this.countdownActive = false
     this.countdown = 0
     this.lastUpdate = Date.now()
   }
 
   resetGame() {
     this.gameStarted = false
+    this.countdownActive = false
     this.countdown = 0
-    this.lastUpdate = Date.now()
 
-    // Reset all players' ready status
+    // Reset all players ready state
     this.players.forEach((player) => {
-      player.ready = false
+      player.setReady(false)
     })
+
+    this.lastUpdate = Date.now()
   }
 
-  // Get lobby statistics
+  // Game lobby management
+  createGame(gameId: string, gameType: string, gameName: string, maxPlayers: number, creatorId: string): GameLobby {
+    const gameLobby = new GameLobby()
+    gameLobby.id = gameId
+    gameLobby.gameType = gameType
+    gameLobby.gameName = gameName
+    gameLobby.maxPlayers = maxPlayers
+    gameLobby.creatorId = creatorId
+
+    this.availableGames.push(gameLobby)
+    this.lastUpdate = Date.now()
+    return gameLobby
+  }
+
+  removeGame(gameId: string): boolean {
+    const index = this.availableGames.findIndex((game) => game.id === gameId)
+    if (index !== -1) {
+      this.availableGames.splice(index, 1)
+      this.lastUpdate = Date.now()
+      return true
+    }
+    return false
+  }
+
+  addPlayerToGame(gameId: string, player: Player): boolean {
+    const game = this.availableGames.find((g) => g.id === gameId)
+    if (game && !game.isFull()) {
+      return game.addPlayer(player)
+    }
+    return false
+  }
+
+  removePlayerFromGame(gameId: string, sessionId: string): boolean {
+    const game = this.availableGames.find((g) => g.id === gameId)
+    if (game) {
+      return game.removePlayer(sessionId)
+    }
+    return false
+  }
+
+  getActiveLobbiesByGameType(gameType: string): any[] {
+    const lobbies: any[] = []
+    this.availableGames.forEach((game) => {
+      if (game.gameType === gameType) {
+        lobbies.push({
+          id: game.id,
+          gameType: game.gameType,
+          gameName: game.gameName,
+          playerCount: game.players.length,
+          maxPlayers: game.maxPlayers,
+          creatorId: game.creatorId,
+          createdAt: game.createdAt,
+        })
+      }
+    })
+    return lobbies
+  }
+
+  getAllActiveLobbies(): any[] {
+    const lobbies: any[] = []
+    this.availableGames.forEach((game) => {
+      lobbies.push({
+        id: game.id,
+        gameType: game.gameType,
+        gameName: game.gameName,
+        playerCount: game.players.length,
+        maxPlayers: game.maxPlayers,
+        creatorId: game.creatorId,
+        createdAt: game.createdAt,
+      })
+    })
+    return lobbies
+  }
+
+  cleanupStaleGames() {
+    const now = Date.now()
+    const staleThreshold = 5 * 60 * 1000 // 5 minutes
+
+    // Remove games that are older than threshold and empty
+    for (let i = this.availableGames.length - 1; i >= 0; i--) {
+      const game = this.availableGames[i]
+      if (game.isEmpty() && now - game.createdAt > staleThreshold) {
+        this.availableGames.splice(i, 1)
+      }
+    }
+
+    this.lastUpdate = Date.now()
+  }
+
+  // Statistics
   getLobbyStats() {
     return {
       totalPlayers: this.getPlayerCount(),
@@ -218,10 +292,11 @@ export class LobbyState extends Schema {
       gameType: this.gameType,
       gameMode: this.gameMode,
       mapTheme: this.mapTheme,
-      canStart: this.canStartGame(),
-      gameStarted: this.gameStarted,
+      canStartGame: this.canStartGame(),
+      countdownActive: this.countdownActive,
       countdown: this.countdown,
-      availableLobbies: this.availableLobbies.length,
+      gameStarted: this.gameStarted,
+      availableGames: this.availableGames.length,
     }
   }
 }
