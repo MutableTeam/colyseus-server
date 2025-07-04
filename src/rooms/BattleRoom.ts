@@ -1,6 +1,6 @@
 import { Room, type Client } from "@colyseus/core"
 import { BattleState } from "../schemas/BattleState"
-import type { BattlePlayer } from "../schemas/BattlePlayer"
+import type { BattlePlayer } from "../schemas/BattlePlayer.ts"
 
 export class BattleRoom extends Room<BattleState> {
   maxClients = 16
