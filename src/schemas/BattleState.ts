@@ -107,19 +107,18 @@ export class BattleState extends Schema {
   checkWinCondition(): string | null {
     if (!this.gameActive) return this.winner
 
-    // Check kill limit
+    // Check kill limit - using for...of loop for proper type inference
     let topPlayer: BattlePlayer | null = null
     let topKills = 0
 
-    // Correct way to iterate over MapSchema in Colyseus
-    this.players.forEach((player: BattlePlayer) => {
+    for (const [sessionId, player] of this.players) {
       if (player.kills > topKills) {
         topKills = player.kills
         topPlayer = player
       }
-    })
+    }
 
-    if (topKills >= this.killLimit && topPlayer !== null) {
+    if (topKills >= this.killLimit && topPlayer) {
       this.winner = topPlayer.name
       this.endGame()
       return this.winner
@@ -134,33 +133,32 @@ export class BattleState extends Schema {
     this.lastUpdate = Date.now()
 
     if (!this.winner) {
-      // Find player with most kills
+      // Find player with most kills - using for...of loop for proper type inference
       let topPlayer: BattlePlayer | null = null
       let topKills = 0
 
-      // Correct way to iterate over MapSchema in Colyseus
-      this.players.forEach((player: BattlePlayer) => {
+      for (const [sessionId, player] of this.players) {
         if (player.kills > topKills) {
           topKills = player.kills
           topPlayer = player
         }
-      })
+      }
 
-      this.winner = topPlayer !== null ? topPlayer.name : "No Winner"
+      this.winner = topPlayer ? topPlayer.name : "No Winner"
     }
   }
 
   getLeaderboard(): Array<{ name: string; kills: number; deaths: number; score: number }> {
     const leaderboard: Array<{ name: string; kills: number; deaths: number; score: number }> = []
 
-    this.players.forEach((player) => {
+    for (const [sessionId, player] of this.players) {
       leaderboard.push({
         name: player.name,
         kills: player.kills,
         deaths: player.deaths,
         score: player.score,
       })
-    })
+    }
 
     // Sort by kills, then by score
     return leaderboard.sort((a, b) => {
@@ -173,11 +171,11 @@ export class BattleState extends Schema {
 
   getAlivePlayers(): BattlePlayer[] {
     const alivePlayers: BattlePlayer[] = []
-    this.players.forEach((player) => {
+    for (const [sessionId, player] of this.players) {
       if (player.isAlive) {
         alivePlayers.push(player)
       }
-    })
+    }
     return alivePlayers
   }
 
