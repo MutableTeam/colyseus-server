@@ -1,5 +1,5 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema"
-import { BattlePlayer } from "./BattlePlayer.ts"
+import { BattlePlayer } from "./BattlePlayer"
 
 // Simple spawn point structure
 export class SpawnPoint extends Schema {
