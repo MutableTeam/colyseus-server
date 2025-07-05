@@ -1,4 +1,4 @@
-import { Room, type Client, matchMaker } from "@colyseus/core"
+import { Room, type Client, matchMaker, updateLobby } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
 import type { Player } from "../schemas/Player"
 
@@ -11,15 +11,20 @@ export class CustomLobbyRoom extends Room<LobbyState> {
   onCreate(options: any) {
     console.log("🏛️ CustomLobbyRoom created!", options)
 
-    // Set metadata for room discovery
+    // Set metadata for room discovery with real-time listing
     this.setMetadata({
       name: options.lobbyName || `Lobby_${Date.now().toString().substring(8)}`,
+      lobbyName: options.lobbyName || `Lobby_${Date.now().toString().substring(8)}`,
       gameType: options.gameType || "battle",
       gameMode: options.gameMode || "deathmatch",
       mapTheme: options.mapTheme || "default",
       maxPlayers: options.maxPlayers || 8,
       isPublic: options.isPublic !== false,
+      hostName: options.hostName || options.username || "Unknown",
       createdAt: Date.now(),
+      currentPlayers: 0,
+      readyPlayers: 0,
+      canJoin: true,
     })
 
     // Initialize lobby state
@@ -30,11 +35,13 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     this.state.mapTheme = options.mapTheme || "default"
     this.state.maxPlayers = options.maxPlayers || 8
     this.state.isPublic = options.isPublic !== false
+    this.state.hostId = options.hostId || ""
 
     // Set up message handlers
     this.setupMessageHandlers()
 
     console.log(`🏛️ CustomLobbyRoom ${this.roomId} ready for players!`)
+    console.log(`📊 Metadata set for real-time listing discovery`)
   }
 
   private setupMessageHandlers() {
@@ -47,6 +54,10 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
         console.log(`🎯 Player ${player.name} is now ${newReadyState ? "ready" : "not ready"}`)
 
+        // Update metadata for real-time listing
+        this.updateMetadataAndLobby()
+
+        // Broadcast to all players including the sender
         this.broadcast("player_ready_changed", {
           playerId: client.sessionId,
           playerName: player.name,
@@ -54,7 +65,19 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           timestamp: Date.now(),
         })
 
-        // Check if all players are ready
+        // Broadcast updated ready count to all players
+        const readyCount = this.state.getReadyPlayers().length
+        const totalPlayers = this.state.getPlayerCount()
+
+        this.broadcast("lobby_ready_count_update", {
+          readyCount: readyCount,
+          totalPlayers: totalPlayers,
+          timestamp: Date.now(),
+        })
+
+        console.log(`📊 CustomLobbyRoom: ${readyCount}/${totalPlayers} players ready`)
+
+        // Check if all players are ready and start countdown
         if (this.state.areAllPlayersReady() && this.state.getPlayerCount() >= 2) {
           this.startCountdown()
         } else {
@@ -69,6 +92,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       if (player && message.gameType) {
         player.selectGameType(message.gameType)
         this.state.setGameType(message.gameType)
+
+        // Update metadata for real-time listing
+        this.updateMetadataAndLobby()
 
         console.log(`🎮 Game type changed to: ${message.gameType}`)
 
@@ -85,6 +111,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       if (message.gameMode) {
         this.state.setGameMode(message.gameMode)
 
+        // Update metadata for real-time listing
+        this.updateMetadataAndLobby()
+
         console.log(`⚔️ Game mode changed to: ${message.gameMode}`)
 
         this.broadcast("game_mode_changed", {
@@ -98,6 +127,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     this.onMessage("select_map_theme", (client: Client, message: any) => {
       if (message.mapTheme) {
         this.state.setMapTheme(message.mapTheme)
+
+        // Update metadata for real-time listing
+        this.updateMetadataAndLobby()
 
         console.log(`🗺️ Map theme changed to: ${message.mapTheme}`)
 
@@ -117,6 +149,44 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       }
     })
 
+    // Handle request for available lobbies
+    this.onMessage("get_available_lobbies", async (client: Client, message: any) => {
+      console.log(`🔍 Player ${client.sessionId} requesting available lobbies`)
+
+      try {
+        const lobbyRooms = await matchMaker.query({ name: "lobby" })
+        const formattedLobbies = lobbyRooms
+          .filter((room: any) => room.roomId !== this.roomId) // Exclude current room
+          .map((room: any) => ({
+            roomId: room.roomId,
+            name: room.metadata?.lobbyName || `Lobby_${room.roomId.substring(0, 8)}`,
+            gameType: room.metadata?.gameType || "battle",
+            gameMode: room.metadata?.gameMode || "deathmatch",
+            currentPlayers: room.clients || 0,
+            maxPlayers: room.metadata?.maxPlayers || 8,
+            readyPlayers: room.metadata?.readyPlayers || 0,
+            isPublic: room.metadata?.isPublic !== false,
+            hostName: room.metadata?.hostName || "Unknown",
+            canJoin: !room.locked && room.clients < room.maxClients,
+            createdAt: room.metadata?.createdAt || Date.now(),
+          }))
+
+        client.send("available_lobbies", {
+          lobbies: formattedLobbies,
+          timestamp: Date.now(),
+        })
+
+        console.log(`📋 Sent ${formattedLobbies.length} available lobbies to ${client.sessionId}`)
+      } catch (error: any) {
+        console.error("❌ Error fetching available lobbies:", error)
+        client.send("available_lobbies", {
+          lobbies: [],
+          error: error.message,
+          timestamp: Date.now(),
+        })
+      }
+    })
+
     // Handle ping/heartbeat messages
     this.onMessage("ping", (client: Client, message: any) => {
       client.send("pong", { timestamp: Date.now() })
@@ -131,7 +201,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       const readyCount = this.state.getReadyPlayers().length
 
       client.send("test_response", {
-        message: "Lobby test response",
+        message: "Custom lobby test response",
         timestamp: Date.now(),
         clientId: client.sessionId,
         roomId: this.roomId,
@@ -150,6 +220,31 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       // Also broadcast current lobby stats to all players
       this.broadcastLobbyStats()
     })
+  }
+
+  private async updateMetadataAndLobby() {
+    const playerCount = this.state.getPlayerCount()
+    const readyCount = this.state.getReadyPlayers().length
+
+    // Update metadata
+    await this.setMetadata({
+      ...this.metadata,
+      currentPlayers: playerCount,
+      readyPlayers: readyCount,
+      gameType: this.state.gameType,
+      gameMode: this.state.gameMode,
+      mapTheme: this.state.mapTheme,
+      canJoin: !this.locked && playerCount < this.maxClients,
+      lastUpdate: Date.now(),
+    })
+
+    // Trigger lobby update for real-time listing
+    try {
+      await updateLobby(this)
+      console.log(`🔄 Updated lobby metadata: ${playerCount} players, ${readyCount} ready`)
+    } catch (error) {
+      console.error("❌ Failed to update lobby:", error)
+    }
   }
 
   async onAuth(client: Client, options: any) {
@@ -184,7 +279,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     }
   }
 
-  onJoin(client: Client, options: any) {
+  async onJoin(client: Client, options: any) {
     console.log(`🚪 CustomLobbyRoom: Player ${client.sessionId} (${options.username}) joined the lobby`)
 
     try {
@@ -202,6 +297,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       console.log(`✅ CustomLobbyRoom: Player ${username} added to lobby state`)
 
       const playerCount = this.state.getPlayerCount()
+
+      // Update metadata and lobby listing
+      await this.updateMetadataAndLobby()
 
       // Send welcome message to new player
       client.send("lobby_joined", {
@@ -238,6 +336,22 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         },
         { except: client },
       )
+
+      // Broadcast initial ready state for the new player
+      this.broadcast("player_ready_changed", {
+        playerId: client.sessionId,
+        playerName: username,
+        ready: false, // New players start as not ready
+        timestamp: Date.now(),
+      })
+
+      // Broadcast updated ready count
+      const readyCount = this.state.getReadyPlayers().length
+      this.broadcast("lobby_ready_count_update", {
+        readyCount: readyCount,
+        totalPlayers: playerCount,
+        timestamp: Date.now(),
+      })
 
       // Broadcast updated lobby stats to all players
       this.broadcastLobbyStats()
@@ -301,6 +415,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
     this.state.startGame()
 
+    // Update metadata to reflect game started
+    await this.updateMetadataAndLobby()
+
     // Prepare game options
     const gameOptions = {
       gameType: this.state.gameType,
@@ -323,16 +440,16 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       let gameRoomName = ""
       switch (this.state.gameType) {
         case "battle":
-          gameRoomName = "BattleRoom"
+          gameRoomName = "battle"
           break
         case "platformer":
-          gameRoomName = "PlatformerRoom"
+          gameRoomName = "platformer"
           break
         case "race":
-          gameRoomName = "RaceRoom"
+          gameRoomName = "race"
           break
         default:
-          gameRoomName = "BattleRoom"
+          gameRoomName = "battle"
       }
 
       // Create the game room using matchMaker
@@ -402,10 +519,17 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       timestamp: Date.now(),
     })
 
+    // Also broadcast ready count specifically
+    this.broadcast("lobby_ready_count_update", {
+      readyCount: stats.readyPlayers,
+      totalPlayers: stats.totalPlayers,
+      timestamp: Date.now(),
+    })
+
     console.log(`📊 CustomLobbyRoom: Broadcasting stats - ${stats.totalPlayers} players, ${stats.readyPlayers} ready`)
   }
 
-  onLeave(client: Client, consented: boolean) {
+  async onLeave(client: Client, consented: boolean) {
     console.log(`👋 CustomLobbyRoom: Player ${client.sessionId} left the lobby (consented: ${consented})`)
 
     try {
@@ -414,6 +538,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
       if (removed) {
         console.log(`✅ CustomLobbyRoom: Player ${client.sessionId} removed from lobby state`)
+
+        // Update metadata and lobby listing
+        await this.updateMetadataAndLobby()
 
         this.broadcast("player_left_lobby", {
           playerId: client.sessionId,
@@ -428,6 +555,9 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           // Transfer host to first remaining player
           this.state.hostId = remainingPlayers[0].sessionId
           console.log(`👑 Host transferred to ${remainingPlayers[0].name}`)
+
+          // Update metadata with new host
+          await this.updateMetadataAndLobby()
 
           this.broadcast("host_changed", {
             newHostId: this.state.hostId,
@@ -472,77 +602,5 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
   onError(client: Client, error: any) {
     console.error(`❌ CustomLobbyRoom: Client ${client.sessionId} error:`, error)
-  }
-
-  private joinOrCreateGameSession(client: Client, gameType: string) {
-    console.log(`🎮 Player ${client.sessionId} joining/creating game session for ${gameType}`)
-
-    if (!this.gameSession) {
-      // Create new game session
-      this.gameSession = {
-        gameType: gameType,
-        players: new Map(),
-        createdAt: Date.now(),
-      }
-    }
-
-    // Add player to game session
-    this.gameSession.players.set(client.sessionId, {
-      sessionId: client.sessionId,
-      ready: false,
-      joinedAt: Date.now(),
-    })
-
-    // Update player's selected game type in lobby state
-    const player = this.state.players.get(client.sessionId) as Player
-    if (player) {
-      player.selectGameType(gameType)
-    }
-
-    // Notify client about joining game session
-    client.send("game_session_joined", {
-      gameType: gameType,
-      sessionPlayers: this.gameSession.players.size,
-    })
-
-    this.broadcastLobbyStats()
-  }
-
-  private removePlayerFromGameSession(sessionId: string) {
-    if (this.gameSession && this.gameSession.players.has(sessionId)) {
-      this.gameSession.players.delete(sessionId)
-
-      // If no players left in game session, remove it
-      if (this.gameSession.players.size === 0) {
-        this.gameSession = null
-      }
-
-      this.broadcastLobbyStats()
-    }
-  }
-
-  private checkAndStartGameSession() {
-    if (!this.gameSession) return
-
-    const readyPlayers = Array.from(this.gameSession.players.values()).filter((p: any) => p.ready)
-
-    if (readyPlayers.length >= 2) {
-      console.log(`🚀 Starting game session with ${readyPlayers.length} ready players`)
-
-      // Notify all ready players to join the actual game room
-      readyPlayers.forEach((player: any) => {
-        const client = this.clients.find((c) => c.sessionId === player.sessionId)
-        if (client) {
-          client.send("start_game", {
-            gameType: this.gameSession.gameType,
-            playerCount: readyPlayers.length,
-          })
-        }
-      })
-
-      // Clear the game session
-      this.gameSession = null
-      this.broadcastLobbyStats()
-    }
   }
 }

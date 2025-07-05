@@ -1,99 +1,91 @@
-import { Room, type Client } from "@colyseus/core"
+import { Room, type Client, updateLobby } from "@colyseus/core"
 import { BattleState } from "../schemas/BattleState"
-import type { BattlePlayer } from "../schemas/BattlePlayer"
+import { BattlePlayer } from "../schemas/BattlePlayer"
 
 export class BattleRoom extends Room<BattleState> {
   maxClients = 16
+  private gameTimer: any = null
   private gameStarted = false
-  private gameStartTimer: any = null
 
   onCreate(options: any) {
-    console.log("⚔️ BattleRoom created for room management!", options)
+    console.log("⚔️ BattleRoom created!", options)
 
-    // Set metadata for room discovery
+    // Set metadata for room discovery with real-time listing
     this.setMetadata({
       name: options.roomName || `Battle_${Date.now().toString().substring(8)}`,
+      roomName: options.roomName || `Battle_${Date.now().toString().substring(8)}`,
       gameType: "battle",
       gameMode: options.gameMode || "deathmatch",
       mapTheme: options.mapTheme || "default",
-      isPublic: true,
+      maxPlayers: options.maxPlayers || 16,
+      isPublic: options.isPublic !== false,
+      hostName: options.hostName || options.username || "Unknown",
       createdAt: Date.now(),
-      gameStarted: this.gameStarted,
+      currentPlayers: 0,
       fromLobby: options.fromLobby || false,
+      lobbyId: options.lobbyId || null,
+    }).then(() => {
+      // Update lobby after setting metadata
+      updateLobby(this)
     })
 
-    // Initialize battle state
     this.setState(new BattleState())
     this.state.gameMode = options.gameMode || "deathmatch"
-    this.state.mapName = options.mapTheme || "default"
-    this.state.gameStarted = false
+    this.state.mapTheme = options.mapTheme || "default"
+    this.state.maxPlayers = options.maxPlayers || 16
 
     // Set up message handlers
     this.setupMessageHandlers()
 
-    console.log(`⚔️ BattleRoom ${this.roomId} ready for players!`)
+    console.log(`⚔️ BattleRoom ${this.roomId} ready for combat!`)
   }
 
   private setupMessageHandlers() {
-    // Handle player movement (simplified)
-    this.onMessage("player_move", (client: Client, message: any) => {
-      const player = this.state.players.get(client.sessionId) as BattlePlayer
-      if (player && message.position) {
-        player.setPosition(
-          message.position.x || player.x,
-          message.position.y || player.y,
-          message.position.z || player.z,
-        )
-      }
-    })
-
-    // Handle player actions
     this.onMessage("player_action", (client: Client, message: any) => {
       const player = this.state.players.get(client.sessionId) as BattlePlayer
-      const abilityType = message.abilityType
-      let success = false
+      if (player && message.action) {
+        console.log(`⚔️ Player ${player.name} performed action: ${message.action}`)
 
-      if (player) {
-        // Handle different action types
-        switch (message.type) {
+        // Handle different battle actions
+        switch (message.action) {
           case "attack":
-            this.handlePlayerAttack(client, message)
+            this.handleAttack(client, message)
             break
-          case "ability":
-            success = this.state.usePlayerAbility(player.sessionId, abilityType)
+          case "move":
+            this.handleMove(client, message)
+            break
+          case "use_ability":
+            this.handleAbility(client, message)
             break
         }
       }
-
-      // Broadcast ability use to all players
-      if (success) {
-        this.broadcast("player_used_ability", {
-          playerId: client.sessionId,
-          abilityType: abilityType,
-          position: { x: player?.x, y: player?.y, z: player?.z },
-          timestamp: Date.now(),
-        })
-      } else if (message.type === "ability") {
-        // Send failure message to player
-        client.send("ability_failed", {
-          abilityType: abilityType,
-          reason: "Cooldown or insufficient resources",
-          timestamp: Date.now(),
-        })
-      }
     })
 
-    // Handle ping/heartbeat messages
-    this.onMessage("ping", (client: Client, message: any) => {
-      client.send("pong", { timestamp: Date.now() })
+    this.onMessage("ready", (client: Client, message: any) => {
+      const player = this.state.players.get(client.sessionId) as BattlePlayer
+      if (player) {
+        player.ready = !player.ready
+        console.log(`⚔️ Player ${player.name} is ${player.ready ? "ready" : "not ready"}`)
+
+        this.broadcast("player_ready_changed", {
+          playerId: client.sessionId,
+          ready: player.ready,
+          timestamp: Date.now(),
+        })
+
+        // Check if all players are ready to start
+        if (this.areAllPlayersReady() && this.state.players.size >= 2) {
+          this.startBattle()
+        }
+      }
     })
 
     // Handle test message for debugging
     this.onMessage("test_message", (client: Client, message: any) => {
       console.log(`🧪 BattleRoom: Test message from ${client.sessionId}:`, message)
 
-      const player = this.state.players.get(client.sessionId) as BattlePlayer
-      const playerCount = this.state.players.size
+      const player = this.state.players.get(client.sessionId)
+      const totalPlayers = this.state.players.size
 
       client.send("test_response", {
         message: "Battle room test response",
@@ -102,72 +94,160 @@ export class BattleRoom extends Room<BattleState> {
         roomId: this.roomId,
         playerFound: !!player,
         playerName: player?.name || "Unknown",
-        totalPlayers: playerCount,
-        gameStarted: this.gameStarted,
+        totalPlayers: totalPlayers,
         gameMode: this.state.gameMode,
-        mapTheme: this.state.mapName,
+        mapTheme: this.state.mapTheme,
         connectedClients: this.clients.length,
       })
 
-      // Also broadcast current stats
       this.broadcastBattleStats()
     })
 
-    // Handle player movement
-    this.onMessage("move", (client: Client, message: any) => {
-      const player = this.state.players.get(client.sessionId) as BattlePlayer
-      if (player && player.isAlive) {
-        const { position, animationState } = message
+    this.onMessage("ping", (client: Client, message: any) => {
+      client.send("pong", { timestamp: Date.now() })
+    })
+  }
 
-        if (position) {
-          player.setPosition(position.x, position.y, position.z)
-        }
+  private handleAttack(client: Client, message: any) {
+    const attacker = this.state.players.get(client.sessionId) as BattlePlayer
+    if (!attacker || !this.gameStarted) return
 
-        if (animationState) {
-          player.animationState = animationState
-        }
-      }
+    // Basic attack logic
+    const damage = Math.floor(Math.random() * 20) + 10
+
+    this.broadcast("player_attacked", {
+      attackerId: client.sessionId,
+      attackerName: attacker.name,
+      damage: damage,
+      timestamp: Date.now(),
     })
 
-    // Handle attack actions
-    this.onMessage("attack", (client: Client, message: any) => {
-      const player = this.state.players.get(client.sessionId) as BattlePlayer
-      if (player && player.isAlive) {
-        this.handlePlayerAttack(client, message)
-      }
-    })
+    console.log(`⚔️ ${attacker.name} attacked for ${damage} damage`)
+  }
 
-    // Handle respawn requests
-    this.onMessage("respawn", (client: Client) => {
-      const player = this.state.players.get(client.sessionId) as BattlePlayer
-      if (player && !player.isAlive && player.isRespawning) {
-        setTimeout(() => {
-          if (this.state.respawnPlayer(client.sessionId)) {
-            this.broadcast("player_respawned", {
-              playerId: client.sessionId,
-            })
-          }
-        }, player.respawnTime * 1000)
-      }
-    })
+  private handleMove(client: Client, message: any) {
+    const player = this.state.players.get(client.sessionId) as BattlePlayer
+    if (!player) return
 
-    // Handle test messages
-    this.onMessage("test", (client: Client, message: any) => {
-      console.log(`🧪 BattleRoom: Test message from ${client.sessionId}:`, message)
+    if (message.x !== undefined) player.x = message.x
+    if (message.y !== undefined) player.y = message.y
 
-      const player = this.state.players.get(client.sessionId) as BattlePlayer
-      client.send("test_response", {
-        message: "Battle room test successful",
+    this.broadcast(
+      "player_moved",
+      {
         playerId: client.sessionId,
-        playerName: player?.name || "Unknown",
-        isAlive: player?.isAlive || false,
-        health: player?.health || 0,
-        kills: player?.kills || 0,
-        gameActive: this.state.gameActive,
-        gameTime: this.state.gameTime,
+        x: player.x,
+        y: player.y,
         timestamp: Date.now(),
-      })
+      },
+      { except: client },
+    )
+  }
+
+  private handleAbility(client: Client, message: any) {
+    const player = this.state.players.get(client.sessionId) as BattlePlayer
+    if (!player || !this.gameStarted) return
+
+    console.log(`⚔️ ${player.name} used ability: ${message.ability}`)
+
+    this.broadcast("player_used_ability", {
+      playerId: client.sessionId,
+      playerName: player.name,
+      ability: message.ability,
+      timestamp: Date.now(),
     })
+  }
+
+  private areAllPlayersReady(): boolean {
+    let allReady = true
+    this.state.players.forEach((player) => {
+      if (!player.ready) {
+        allReady = false
+      }
+    })
+    return allReady
+  }
+
+  private startBattle() {
+    if (this.gameStarted) return
+
+    this.gameStarted = true
+    console.log(`⚔️ Battle starting with ${this.state.players.size} players!`)
+
+    this.broadcast("battle_started", {
+      message: "Battle has begun!",
+      playerCount: this.state.players.size,
+      timestamp: Date.now(),
+    })
+
+    // Update metadata to reflect game started
+    this.setMetadata({
+      ...this.metadata,
+      gameStarted: true,
+      startedAt: Date.now(),
+    }).then(() => {
+      updateLobby(this)
+    })
+
+    // Set up game timer (example: 5 minute battles)
+    this.gameTimer = setTimeout(
+      () => {
+        this.endBattle()
+      },
+      5 * 60 * 1000,
+    )
+  }
+
+  private endBattle() {
+    if (!this.gameStarted) return
+
+    console.log(`⚔️ Battle ended in room ${this.roomId}`)
+
+    this.broadcast("battle_ended", {
+      message: "Battle has ended!",
+      timestamp: Date.now(),
+    })
+
+    this.gameStarted = false
+
+    // Reset all players
+    this.state.players.forEach((player) => {
+      player.ready = false
+      player.health = 100
+    })
+
+    if (this.gameTimer) {
+      clearTimeout(this.gameTimer)
+      this.gameTimer = null
+    }
+
+    // Update metadata
+    this.setMetadata({
+      ...this.metadata,
+      gameStarted: false,
+      lastGameEndedAt: Date.now(),
+    }).then(() => {
+      updateLobby(this)
+    })
+  }
+
+  private async updateMetadataAndLobby() {
+    const playerCount = this.state.players.size
+
+    // Update metadata
+    await this.setMetadata({
+      ...this.metadata,
+      currentPlayers: playerCount,
+      lastUpdate: Date.now(),
+    })
+
+    // Trigger lobby update for real-time listing
+    try {
+      await updateLobby(this)
+      console.log(`🔄 Updated battle room metadata: ${playerCount} players`)
+    } catch (error) {
+      console.error("❌ Failed to update battle room lobby:", error)
+    }
   }
 
   async onAuth(client: Client, options: any) {
@@ -180,7 +260,7 @@ export class BattleRoom extends Room<BattleState> {
 
       let username = options.username
       if (!username || typeof username !== "string" || username.trim() === "") {
-        username = `Warrior_${client.sessionId.substring(0, 6)}`
+        username = `Player_${client.sessionId.substring(0, 6)}`
       }
 
       username = username.trim().substring(0, 20)
@@ -195,7 +275,6 @@ export class BattleRoom extends Room<BattleState> {
         authenticated: true,
         joinTime: Date.now(),
         characterType: options.characterType || "default",
-        fromLobby: options.fromLobby || false,
       }
     } catch (error: any) {
       console.error(`❌ BattleRoom: Authentication failed for ${client.sessionId}:`, error.message)
@@ -203,23 +282,32 @@ export class BattleRoom extends Room<BattleState> {
     }
   }
 
-  onJoin(client: Client, options: any) {
+  async onJoin(client: Client, options: any) {
     console.log(`🚪 BattleRoom: Player ${client.sessionId} (${options.username}) joined the battle`)
 
     try {
-      const username = options.username || `Warrior_${client.sessionId.substring(0, 6)}`
+      const username = options.username || `Player_${client.sessionId.substring(0, 6)}`
 
-      // Add player to battle state using the method on BattleState
-      const player = this.state.addPlayer(
-        client.sessionId,
-        username,
-        options.characterType || "default",
-        options.fromLobby || false,
-      )
+      // Create battle player
+      const player = new BattlePlayer()
+      player.sessionId = client.sessionId
+      player.name = username
+      player.characterType = options.characterType || "default"
+      player.health = 100
+      player.energy = 100
+      player.level = 1
+      player.x = Math.random() * 800
+      player.y = Math.random() * 600
+      player.ready = false
+
+      this.state.players.set(client.sessionId, player)
 
       console.log(`✅ BattleRoom: Player ${username} added to battle state`)
 
       const playerCount = this.state.players.size
+
+      // Update metadata and lobby listing
+      await this.updateMetadataAndLobby()
 
       // Send welcome message to new player
       client.send("battle_room_joined", {
@@ -228,17 +316,7 @@ export class BattleRoom extends Room<BattleState> {
         playerName: username,
         playerCount: playerCount,
         gameMode: this.state.gameMode,
-        mapTheme: this.state.mapName,
-        gameStarted: this.gameStarted,
-        timestamp: Date.now(),
-      })
-
-      // Send current battle state to new player
-      client.send("battle_state_update", {
-        players: this.getPlayersArray(),
-        gameStarted: this.gameStarted,
-        gameMode: this.state.gameMode,
-        mapTheme: this.state.mapName,
+        mapTheme: this.state.mapTheme,
         timestamp: Date.now(),
       })
 
@@ -254,100 +332,14 @@ export class BattleRoom extends Room<BattleState> {
         { except: client },
       )
 
-      // Broadcast updated stats to all players
+      // Broadcast updated battle stats to all players
       this.broadcastBattleStats()
 
       console.log(`📊 BattleRoom: Now has ${playerCount} players`)
-
-      // Auto-start game if we have enough players and came from lobby
-      if (options.fromLobby && playerCount >= 2 && !this.gameStarted) {
-        this.scheduleGameStart()
-      }
     } catch (error: any) {
       console.error(`❌ BattleRoom: Error in onJoin for ${client.sessionId}:`, error)
       client.send("error", { message: "Failed to join battle room" })
     }
-  }
-
-  private scheduleGameStart() {
-    if (this.gameStartTimer) {
-      clearTimeout(this.gameStartTimer)
-    }
-
-    console.log(`⏰ BattleRoom: Scheduling game start in 5 seconds...`)
-    this.broadcast("game_starting_soon", {
-      message: "Battle starting in 5 seconds!",
-      countdown: 5,
-      timestamp: Date.now(),
-    })
-
-    this.gameStartTimer = setTimeout(() => {
-      this.startGame()
-    }, 5000)
-  }
-
-  private startGame() {
-    if (this.gameStarted) return
-
-    this.gameStarted = true
-    this.state.gameStarted = true
-
-    // Update metadata
-    this.setMetadata({
-      ...this.metadata,
-      gameStarted: true,
-    })
-
-    console.log(`🎮 BattleRoom: Game started with ${this.state.players.size} players!`)
-
-    // Broadcast game start to all players
-    this.broadcast("game_started", {
-      message: "Battle has begun!",
-      gameMode: this.state.gameMode,
-      mapTheme: this.state.mapName,
-      playerCount: this.state.players.size,
-      timestamp: Date.now(),
-    })
-
-    // Initialize scene data for all players
-    this.broadcast("initialize_scene", {
-      mapTheme: this.state.mapName,
-      players: this.getPlayersArray(),
-      timestamp: Date.now(),
-    })
-  }
-
-  private handlePlayerAttack(client: Client, message: any) {
-    const player = this.state.players.get(client.sessionId) as BattlePlayer
-    if (!player || !this.gameStarted) return
-
-    // Broadcast attack to all players
-    this.broadcast("player_attacked", {
-      playerId: client.sessionId,
-      attackType: message.attackType || "basic",
-      position: { x: player.x, y: player.y, z: player.z },
-      timestamp: Date.now(),
-    })
-  }
-
-  private getPlayersArray() {
-    const players: any[] = []
-    this.state.players.forEach((player, id) => {
-      players.push({
-        id: id,
-        name: player.name,
-        characterType: player.characterType,
-        health: player.health,
-        score: player.score,
-        isAlive: player.isAlive,
-        kills: player.kills,
-        deaths: player.deaths,
-        x: player.x,
-        y: player.y,
-        z: player.z,
-      })
-    })
-    return players
   }
 
   private broadcastBattleStats() {
@@ -355,9 +347,9 @@ export class BattleRoom extends Room<BattleState> {
 
     this.broadcast("battle_room_stats_update", {
       totalPlayers: playerCount,
-      gameStarted: this.gameStarted,
+      maxPlayers: this.maxClients,
       gameMode: this.state.gameMode,
-      mapTheme: this.state.mapName,
+      mapTheme: this.state.mapTheme,
       timestamp: Date.now(),
     })
 
@@ -367,18 +359,20 @@ export class BattleRoom extends Room<BattleState> {
       timestamp: Date.now(),
     })
 
-    console.log(`📊 BattleRoom: Broadcasting stats - ${playerCount} players, game started: ${this.gameStarted}`)
+    console.log(`📊 BattleRoom: Broadcasting stats - ${playerCount} players`)
   }
 
-  onLeave(client: Client, consented: boolean) {
+  async onLeave(client: Client, consented: boolean) {
     console.log(`👋 BattleRoom: Player ${client.sessionId} left the battle (consented: ${consented})`)
 
     try {
-      // Remove player from battle state using the method on BattleState
-      const removed = this.state.removePlayer(client.sessionId)
+      const removed = this.state.players.delete(client.sessionId)
 
       if (removed) {
         console.log(`✅ BattleRoom: Player ${client.sessionId} removed from battle state`)
+
+        // Update metadata and lobby listing
+        await this.updateMetadataAndLobby()
 
         this.broadcast("player_left_battle", {
           playerId: client.sessionId,
@@ -392,44 +386,22 @@ export class BattleRoom extends Room<BattleState> {
       const remainingPlayers = this.state.players.size
       console.log(`📊 BattleRoom: Now has ${remainingPlayers} players`)
 
-      // End game if not enough players remain
-      if (this.gameStarted && remainingPlayers < 2) {
-        this.endGame("Not enough players")
+      // Close battle room if empty
+      if (remainingPlayers === 0) {
+        console.log(`⚔️ BattleRoom: Battle room is empty, scheduling cleanup...`)
+        setTimeout(() => {
+          this.disconnect()
+        }, 5000)
       }
     } catch (error: any) {
       console.error(`❌ BattleRoom: Error in onLeave for ${client.sessionId}:`, error)
     }
   }
 
-  private endGame(reason: string) {
-    if (!this.gameStarted) return
-
-    this.gameStarted = false
-    this.state.gameStarted = false
-
-    console.log(`🏁 BattleRoom: Game ended - ${reason}`)
-
-    this.setMetadata({
-      ...this.metadata,
-      gameStarted: false,
-    })
-
-    this.broadcast("game_ended", {
-      reason: reason,
-      finalScores: this.getPlayersArray(),
-      timestamp: Date.now(),
-    })
-
-    if (this.gameStartTimer) {
-      clearTimeout(this.gameStartTimer)
-      this.gameStartTimer = null
-    }
-  }
-
   onDispose() {
     console.log("⚔️ BattleRoom: Room disposed")
-    if (this.gameStartTimer) {
-      clearTimeout(this.gameStartTimer)
+    if (this.gameTimer) {
+      clearTimeout(this.gameTimer)
     }
   }
 
