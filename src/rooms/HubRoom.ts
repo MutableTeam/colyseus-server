@@ -149,7 +149,12 @@ export class HubRoom extends Room<HubState> {
         type: room.name,
         currentPlayers: room.clients || 0,
         maxPlayers: room.maxClients || 50,
-        createdAt: room.createdAt || Date.now(),
+        // Ensure createdAt is always a number (timestamp)
+        createdAt: room.createdAt
+          ? typeof room.createdAt === "number"
+            ? room.createdAt
+            : new Date(room.createdAt).getTime()
+          : Date.now(),
         locked: room.locked || false,
         private: room.private || false,
       }))

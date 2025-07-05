@@ -99,7 +99,16 @@ export class HubState extends Schema {
       lobby.type = lobbyData.type
       lobby.currentPlayers = lobbyData.currentPlayers
       lobby.maxPlayers = lobbyData.maxPlayers
-      lobby.createdAt = lobbyData.createdAt
+
+      // Ensure createdAt is always a number (timestamp)
+      if (typeof lobbyData.createdAt === "number") {
+        lobby.createdAt = lobbyData.createdAt
+      } else if (typeof lobbyData.createdAt === "string") {
+        lobby.createdAt = new Date(lobbyData.createdAt).getTime()
+      } else {
+        lobby.createdAt = Date.now()
+      }
+
       lobby.locked = lobbyData.locked
       lobby.private = lobbyData.private
 
