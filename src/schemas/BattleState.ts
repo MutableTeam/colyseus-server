@@ -19,11 +19,11 @@ export class BattleState extends Schema {
   @type({ map: BattlePlayer }) players = new MapSchema<BattlePlayer>()
   @type([SpawnPoint]) spawnPoints = new ArraySchema<SpawnPoint>()
 
-  // Map properties (simplified)
+  // Map properties
   @type("string") mapName = "default"
   @type("string") mapTheme = "default"
 
-  // Game state (simplified for room management)
+  // Game state
   @type("boolean") gameStarted = false
   @type("boolean") gameEnded = false
   @type("number") gameStartTime = 0
@@ -34,12 +34,14 @@ export class BattleState extends Schema {
   @type("number") killLimit = 25
   @type("string") winner = ""
   @type("number") lastUpdate = 0
+  @type("number") maxPlayers = 16
 
   constructor() {
     super()
     this.gameTime = 0
     this.gameActive = true
     this.lastUpdate = Date.now()
+    this.maxPlayers = 16
     this.initializeSpawnPoints()
   }
 

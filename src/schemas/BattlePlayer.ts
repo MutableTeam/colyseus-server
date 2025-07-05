@@ -25,6 +25,10 @@ export class BattlePlayer extends Schema {
   @type("number") respawnTime = 5
   @type("number") lastDamageTime = 0
 
+  // Player state properties
+  @type("boolean") ready = false
+  @type("number") level = 1
+
   // Combat stats
   @type("number") kills = 0
   @type("number") deaths = 0
@@ -63,6 +67,8 @@ export class BattlePlayer extends Schema {
     this.health = this.maxHealth
     this.energy = this.maxEnergy
     this.isAlive = true
+    this.ready = false
+    this.level = 1
   }
 
   // Position methods
@@ -139,6 +145,34 @@ export class BattlePlayer extends Schema {
   addDamageDealt(damage: number) {
     this.damageDealt += damage
     this.score += Math.floor(damage / 10)
+    this.update()
+  }
+
+  // Ready state methods
+  setReady(ready: boolean) {
+    this.ready = ready
+    this.update()
+  }
+
+  toggleReady() {
+    this.ready = !this.ready
+    this.update()
+  }
+
+  // Level methods
+  setLevel(level: number) {
+    this.level = Math.max(1, level)
+    this.update()
+  }
+
+  addExperience(exp: number) {
+    // Simple leveling system
+    this.score += exp
+    const newLevel = Math.floor(this.score / 1000) + 1
+    if (newLevel > this.level) {
+      this.level = newLevel
+      console.log(`Player ${this.name} leveled up to ${this.level}!`)
+    }
     this.update()
   }
 
@@ -317,6 +351,8 @@ export class BattlePlayer extends Schema {
       damageDealt: this.damageDealt,
       damageTaken: this.damageTaken,
       kdr: this.deaths > 0 ? this.kills / this.deaths : this.kills,
+      level: this.level,
+      ready: this.ready,
     }
   }
 }
