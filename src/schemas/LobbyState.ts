@@ -53,6 +53,8 @@ export class LobbyState extends Schema {
   @type("number") maxPlayers = 8
   @type("boolean") isPublic = true
   @type("string") hostId = ""
+  @type("string") hostName = ""
+  @type("number") readyPlayers = 0
 
   // Game state
   @type("boolean") gameStarted = false
@@ -132,6 +134,11 @@ export class LobbyState extends Schema {
     return this.getPlayerCount() >= 2 && this.areAllPlayersReady()
   }
 
+  updateReadyCount() {
+    this.readyPlayers = this.getReadyPlayers().length
+    this.lastUpdate = Date.now()
+  }
+
   // Game settings
   setGameType(gameType: string) {
     this.gameType = gameType
@@ -145,6 +152,11 @@ export class LobbyState extends Schema {
 
   setMapTheme(mapTheme: string) {
     this.mapTheme = mapTheme
+    this.lastUpdate = Date.now()
+  }
+
+  setHostName(hostName: string) {
+    this.hostName = hostName
     this.lastUpdate = Date.now()
   }
 

@@ -8,32 +8,30 @@ export class BattlePlayer extends Schema {
   @type("number") x = 0
   @type("number") y = 0
   @type("number") z = 0
+  @type("number") health = 100
+  @type("number") maxHealth = 100
+  @type("number") score = 0
+  @type("number") kills = 0
+  @type("number") deaths = 0
+  @type("boolean") isAlive = true
+  @type("boolean") ready = false
+  @type("number") level = 1
   @type("string") animationState = "idle"
   @type("boolean") isConnected = true
   @type("number") joinTime = 0
   @type("number") lastUpdateTime = 0
 
   // Battle-specific properties
-  @type("number") health = 100
-  @type("number") maxHealth = 100
   @type("number") armor = 0
   @type("number") shield = 0
   @type("number") energy = 100
   @type("number") maxEnergy = 100
-  @type("boolean") isAlive = true
   @type("boolean") isRespawning = false
   @type("number") respawnTime = 5
   @type("number") lastDamageTime = 0
 
-  // Player state properties
-  @type("boolean") ready = false
-  @type("number") level = 1
-
   // Combat stats
-  @type("number") kills = 0
-  @type("number") deaths = 0
   @type("number") assists = 0
-  @type("number") score = 0
   @type("number") damageDealt = 0
   @type("number") damageTaken = 0
 
@@ -80,71 +78,41 @@ export class BattlePlayer extends Schema {
   }
 
   // Health and damage methods
-  takeDamage(damage: number, attackerId?: string): boolean {
-    if (!this.isAlive || this.isRespawning) return false
-
-    const actualDamage = Math.max(0, damage - this.armor)
-    this.health = Math.max(0, this.health - actualDamage)
-    this.damageTaken += actualDamage
-    this.lastDamageTime = Date.now()
-
+  takeDamage(damage: number) {
+    this.health = Math.max(0, this.health - damage)
     if (this.health <= 0) {
-      this.die()
-      return true
+      this.isAlive = false
+      this.deaths++
     }
-
     this.update()
-    return false
   }
 
   heal(amount: number) {
-    if (!this.isAlive) return
-
     this.health = Math.min(this.maxHealth, this.health + amount)
     this.update()
   }
 
-  die() {
-    this.isAlive = false
-    this.health = 0
-    this.deaths++
-    this.isRespawning = true
-    this.animationState = "dead"
-    this.update()
-  }
-
-  respawn() {
-    this.isAlive = true
-    this.health = this.maxHealth
-    this.energy = this.maxEnergy
-    this.isRespawning = false
-    this.animationState = "idle"
-    this.isGrounded = true
-    this.isJumping = false
-    this.isDashing = false
-    this.isAttacking = false
-    this.isBlocking = false
-    this.isStunned = false
-    this.stunDuration = 0
-    this.update()
-  }
-
   // Combat methods
+  addScore(points: number) {
+    this.score += points
+    this.update()
+  }
+
   addKill() {
     this.kills++
-    this.score += 100
+    this.addScore(100)
     this.update()
   }
 
   addAssist() {
     this.assists++
-    this.score += 50
+    this.addScore(50)
     this.update()
   }
 
   addDamageDealt(damage: number) {
     this.damageDealt += damage
-    this.score += Math.floor(damage / 10)
+    this.addScore(Math.floor(damage / 10))
     this.update()
   }
 
@@ -173,6 +141,11 @@ export class BattlePlayer extends Schema {
       this.level = newLevel
       console.log(`Player ${this.name} leveled up to ${this.level}!`)
     }
+    this.update()
+  }
+
+  levelUp() {
+    this.level++
     this.update()
   }
 
@@ -252,14 +225,13 @@ export class BattlePlayer extends Schema {
   stun(duration: number) {
     this.isStunned = true
     this.stunDuration = duration
-    this.animationState = "stunned"
-    this.update()
+    this.setAnimationState("stunned")
 
     setTimeout(() => {
       this.isStunned = false
       this.stunDuration = 0
       if (this.animationState === "stunned") {
-        this.animationState = "idle"
+        this.setAnimationState("idle")
       }
       this.update()
     }, duration)
@@ -270,8 +242,7 @@ export class BattlePlayer extends Schema {
     if (this.isGrounded && !this.isJumping) {
       this.isJumping = true
       this.isGrounded = false
-      this.animationState = "jumping"
-      this.update()
+      this.setAnimationState("jumping")
     }
   }
 
@@ -279,7 +250,7 @@ export class BattlePlayer extends Schema {
     this.isGrounded = true
     this.isJumping = false
     if (this.animationState === "jumping") {
-      this.animationState = "idle"
+      this.setAnimationState("idle")
     }
     this.update()
   }
@@ -287,15 +258,14 @@ export class BattlePlayer extends Schema {
   startAttack() {
     if (!this.isAttacking && this.isAlive) {
       this.isAttacking = true
-      this.animationState = "attacking"
-      this.update()
+      this.setAnimationState("attacking")
     }
   }
 
   stopAttack() {
     this.isAttacking = false
     if (this.animationState === "attacking") {
-      this.animationState = "idle"
+      this.setAnimationState("idle")
     }
     this.update()
   }
@@ -303,16 +273,42 @@ export class BattlePlayer extends Schema {
   startBlocking() {
     if (!this.isBlocking && this.isAlive) {
       this.isBlocking = true
-      this.animationState = "blocking"
-      this.update()
+      this.setAnimationState("blocking")
     }
   }
 
   stopBlocking() {
     this.isBlocking = false
     if (this.animationState === "blocking") {
-      this.animationState = "idle"
+      this.setAnimationState("idle")
     }
+    this.update()
+  }
+
+  // Respawn method
+  respawn() {
+    this.health = this.maxHealth
+    this.isAlive = true
+    this.setAnimationState("idle")
+    this.isGrounded = true
+    this.isJumping = false
+    this.isDashing = false
+    this.isAttacking = false
+    this.isBlocking = false
+    this.isStunned = false
+    this.stunDuration = 0
+    this.update()
+  }
+
+  // Animation state method
+  setAnimationState(state: string) {
+    this.animationState = state
+    this.update()
+  }
+
+  // Connection state method
+  setConnected(connected: boolean) {
+    this.isConnected = connected
     this.update()
   }
 

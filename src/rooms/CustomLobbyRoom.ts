@@ -1,4 +1,4 @@
-import { Room, type Client, updateLobby } from "@colyseus/core"
+import { Room, type Client, updateLobby, matchMaker } from "@colyseus/core"
 import { LobbyState } from "../schemas/LobbyState"
 import { Player } from "../schemas/Player"
 
@@ -50,7 +50,8 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         player.ready = !player.ready
         console.log(`🏛️ Player ${player.name} is ${player.ready ? "ready" : "not ready"}`)
 
-        this.updateReadyCount()
+        this.state.updateReadyCount()
+        this.updateMetadataAndLobby()
 
         this.broadcast("player_ready_changed", {
           playerId: client.sessionId,
@@ -59,7 +60,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         })
 
         // Check if all players are ready to start countdown
-        if (this.areAllPlayersReady() && this.state.players.size >= 2) {
+        if (this.state.areAllPlayersReady() && this.state.players.size >= 2) {
           this.startCountdown()
         } else if (this.countdownActive) {
           this.cancelCountdown()
@@ -102,27 +103,6 @@ export class CustomLobbyRoom extends Room<LobbyState> {
     this.onMessage("ping", (client: Client, message: any) => {
       client.send("pong", { timestamp: Date.now() })
     })
-  }
-
-  private updateReadyCount() {
-    let readyCount = 0
-    this.state.players.forEach((player) => {
-      if (player.ready) readyCount++
-    })
-    this.state.readyPlayers = readyCount
-
-    // Update metadata
-    this.updateMetadataAndLobby()
-  }
-
-  private areAllPlayersReady(): boolean {
-    let allReady = true
-    this.state.players.forEach((player) => {
-      if (!player.ready) {
-        allReady = false
-      }
-    })
-    return allReady && this.state.players.size > 0
   }
 
   private startCountdown() {
@@ -201,7 +181,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
     try {
       // Create the game room based on lobby settings
-      const gameRoom = await this.presence.create(this.state.gameType, {
+      const gameRoom = await matchMaker.createRoom(this.state.gameType, {
         lobbyId: this.roomId,
         fromLobby: true,
         gameMode: this.state.gameMode,
@@ -239,16 +219,14 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       this.state.players.forEach((player) => {
         player.ready = false
       })
-      this.updateReadyCount()
+      this.state.updateReadyCount()
+      this.updateMetadataAndLobby()
     }
   }
 
   private async updateMetadataAndLobby() {
     const playerCount = this.state.players.size
-    let readyCount = 0
-    this.state.players.forEach((player) => {
-      if (player.ready) readyCount++
-    })
+    const readyCount = this.state.readyPlayers
 
     // Update metadata
     await this.setMetadata({
@@ -258,6 +236,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
       gameMode: this.state.gameMode,
       mapTheme: this.state.mapTheme,
       maxPlayers: this.state.maxPlayers,
+      hostName: this.state.hostName,
       lastUpdate: Date.now(),
     })
 
@@ -318,11 +297,18 @@ export class CustomLobbyRoom extends Room<LobbyState> {
 
       this.state.players.set(client.sessionId, player)
 
+      // Set host name if this is the first player
+      if (player.isHost) {
+        this.state.hostName = username
+        this.state.hostId = client.sessionId
+      }
+
       console.log(`✅ CustomLobbyRoom: Player ${username} added to lobby state`)
 
       const playerCount = this.state.players.size
 
-      // Update metadata and lobby listing
+      // Update ready count and metadata
+      this.state.updateReadyCount()
       await this.updateMetadataAndLobby()
 
       // Send welcome message to new player
@@ -378,6 +364,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           if (newHost) {
             newHost.isHost = true
             this.state.hostName = newHost.name
+            this.state.hostId = newHost.sessionId
             console.log(`👑 New host assigned: ${newHost.name}`)
 
             this.broadcast("new_host_assigned", {
@@ -388,7 +375,8 @@ export class CustomLobbyRoom extends Room<LobbyState> {
           }
         }
 
-        // Update metadata and lobby listing
+        // Update ready count and metadata
+        this.state.updateReadyCount()
         await this.updateMetadataAndLobby()
 
         this.broadcast("player_left_lobby", {
@@ -397,7 +385,7 @@ export class CustomLobbyRoom extends Room<LobbyState> {
         })
 
         // Cancel countdown if not enough ready players
-        if (this.countdownActive && (!this.areAllPlayersReady() || this.state.players.size < 2)) {
+        if (this.countdownActive && (!this.state.areAllPlayersReady() || this.state.players.size < 2)) {
           this.cancelCountdown()
         }
       }

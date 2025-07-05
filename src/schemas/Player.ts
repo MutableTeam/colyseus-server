@@ -11,6 +11,7 @@ export class Player extends Schema {
   @type("string") animationState = "idle"
   @type("boolean") isConnected = true
   @type("boolean") ready = false
+  @type("boolean") isHost = false
   @type("string") selectedGameType = ""
   @type("number") joinTime = 0
   @type("number") lastUpdateTime = 0
@@ -30,6 +31,11 @@ export class Player extends Schema {
 
   setReady(ready: boolean) {
     this.ready = ready
+    this.update()
+  }
+
+  setHost(isHost: boolean) {
+    this.isHost = isHost
     this.update()
   }
 
